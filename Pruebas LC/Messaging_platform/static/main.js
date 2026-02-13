@@ -116,6 +116,72 @@ async function checkBalance() {
 }
 
 /* =========================
+   Configuraciones
+========================= */
+
+/* Abrir panel */
+function openSettings() {
+  document.getElementById("settingsPanel").style.display = "block";
+}
+
+function closeSettings() {
+  document.getElementById("settingsPanel").style.display = "none";
+}
+
+window.onclick = function(event) {
+  const modal = document.getElementById("settingsPanel");
+  if (event.target === modal) {
+    modal.style.display = "none";
+  }
+}
+
+/* Activar Webhook */
+async function applyWebhook() {
+  const id_canal = parseInt(document.getElementById("canalId").value);
+  const url = document.getElementById("webhookUrl").value;
+  const secret = document.getElementById("secret").value;
+
+  const res = await fetch("/config/setWebhook", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      id_canal,
+      estado: true,
+      url,
+      secret
+    })
+  });
+
+  const data = await res.json();
+  alert("Webhook configurado");
+}
+
+/* Consultar Webhook */
+async function checkWebhook() {
+  const id_canal = parseInt(document.getElementById("canalId").value);
+
+  const res = await fetch("/config/getWebhook", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ id_canal })
+  });
+
+  const data = await res.json();
+  alert(JSON.stringify(data, null, 2));
+}
+
+/* Consultar Balance */
+async function consultBalance() {
+  const res = await fetch("/config/balance");
+  const data = await res.json();
+
+  document.getElementById("balanceDisplay").innerText =
+    `Saldo actual: $${data.data.balance}`;
+
+  // aquí puedes llamar endpoint que lo guarde en DB si quieres persistencia
+}
+
+/* =========================
    INIT
 ========================= */
 

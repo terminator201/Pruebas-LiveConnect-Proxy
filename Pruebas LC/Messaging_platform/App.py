@@ -24,6 +24,17 @@ def home():
 def api_get_conversations():
     return jsonify(get_conversations())
 
+@app.route("/config/setWebhook", methods=["POST"])
+def config_set_webhook():
+    return jsonify(set_webhook(request.json))
+
+@app.route("/config/getWebhook", methods=["POST"])
+def config_get_webhook():
+    return jsonify(get_webhook(request.json["id_canal"]))
+
+@app.route("/config/balance", methods=["GET"])
+def config_balance():
+    return jsonify(get_balance())
 
 @app.route("/messages/<conversation_id>", methods=["GET"])
 def api_get_messages(conversation_id):

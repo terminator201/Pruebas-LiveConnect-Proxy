@@ -1,5 +1,6 @@
 import requests
 from metodos.Token import obtener_token
+from DB.database import save_balance
 
 def get_balance():
     token = obtener_token()
@@ -10,4 +11,9 @@ def get_balance():
         headers=headers
     )
 
-    return res.json()
+    data = res.json()
+
+    # 🔹 Guardar balance en DB
+    save_balance(data)
+
+    return data
