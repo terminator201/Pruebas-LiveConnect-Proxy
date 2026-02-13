@@ -6,14 +6,27 @@ def get_balance():
     token = obtener_token()
     headers = {"PageGearToken": token}
 
-    res = requests.get(
-        "https://api.liveconnect.chat/prod/proxy/balance",
-        headers=headers
-    )
+    try:
+        res = requests.get(
+            "https://api.liveconnect.chat/prod/proxy/balance",
+            headers=headers,
+            timeout=20
+        )
+    except requests.RequestException as e:
+        return {"ok": False, "error": f"Error de red en balance: {str(e)}"}
 
-    data = res.json()
+    try:
+        payload = res.json()
+    except ValueError:
+        payload = {"raw_response": res.text}
 
-    # 🔹 Guardar balance en DB
-    save_balance(data)
+    if isinstance(payload, dict):
+        payload.setdefault("ok", res.ok)
+        payload["status_code"] = res.status_code
+    else:
+        payload = {"ok": res.ok, "status_code": res.status_code, "data": payload}
 
-    return data
+    if res.ok:
+        save_balance(payload)
+
+    return payload

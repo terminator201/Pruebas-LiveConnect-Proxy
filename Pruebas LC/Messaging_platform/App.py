@@ -16,6 +16,15 @@ init_db()
 
 app = Flask(__name__)
 
+def _status_from_result(result):
+    if isinstance(result, dict):
+        status = result.get("status_code")
+        if isinstance(status, int):
+            return status
+        if result.get("ok") is False:
+            return 502
+    return 200
+
 @app.route("/", methods=["GET"])
 def home():
     return render_template("index.html")
@@ -26,15 +35,23 @@ def api_get_conversations():
 
 @app.route("/config/setWebhook", methods=["POST"])
 def config_set_webhook():
-    return jsonify(set_webhook(request.json))
+    payload = request.get_json(silent=True) or {}
+    result = set_webhook(payload)
+    return jsonify(result), _status_from_result(result)
 
 @app.route("/config/getWebhook", methods=["POST"])
 def config_get_webhook():
-    return jsonify(get_webhook(request.json["id_canal"]))
+    payload = request.get_json(silent=True) or {}
+    id_canal = payload.get("id_canal")
+    if id_canal is None:
+        return jsonify({"ok": False, "error": "id_canal es requerido"}), 400
+    result = get_webhook(id_canal)
+    return jsonify(result), _status_from_result(result)
 
 @app.route("/config/balance", methods=["GET"])
 def config_balance():
-    return jsonify(get_balance())
+    result = get_balance()
+    return jsonify(result), _status_from_result(result)
 
 @app.route("/messages/<conversation_id>", methods=["GET"])
 def api_get_messages(conversation_id):
@@ -46,11 +63,18 @@ def webhook():
 
 @app.route("/setWebhook", methods=["POST"])
 def api_set_webhook():
-    return jsonify(set_webhook(request.json))
+    payload = request.get_json(silent=True) or {}
+    result = set_webhook(payload)
+    return jsonify(result), _status_from_result(result)
 
 @app.route("/getWebhook", methods=["POST"])
 def api_get_webhook():
-    return jsonify(get_webhook(request.json["id_canal"]))
+    payload = request.get_json(silent=True) or {}
+    id_canal = payload.get("id_canal")
+    if id_canal is None:
+        return jsonify({"ok": False, "error": "id_canal es requerido"}), 400
+    result = get_webhook(id_canal)
+    return jsonify(result), _status_from_result(result)
 
 @app.route("/sendMessage", methods=["POST"])
 def api_send_message():
@@ -70,7 +94,8 @@ def api_transfer():
 
 @app.route("/balance", methods=["GET"])
 def api_balance():
-    return jsonify(get_balance())
+    result = get_balance()
+    return jsonify(result), _status_from_result(result)
 
 if __name__ == "__main__":
     app.run(port=3000)

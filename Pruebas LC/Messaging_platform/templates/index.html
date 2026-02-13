@@ -94,10 +94,47 @@
       display: flex;
       gap: 10px;
     }
+
+    #configStatus {
+      margin-top: 10px;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 14px;
+      background: #f4f4f4;
+    }
+
+    #configStatus.ok {
+      color: #065f46;
+      background: #d1fae5;
+    }
+
+    #configStatus.error {
+      color: #991b1b;
+      background: #fee2e2;
+    }
+
+    #webhookResult {
+      margin-top: 10px;
+      max-height: 140px;
+      overflow-y: auto;
+      background: #111827;
+      color: #f9fafb;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    #balanceDisplay {
+      margin: 8px 0 10px;
+      padding: 10px;
+      border-radius: 8px;
+      background: #f3f4f6;
+      font-weight: 600;
+    }
   </style>
 </head>
-
-<h1 style="color:red;">CAMBIO DE PRUEBA</h1>
 <body>
 
 <!-- Botón Configuración dentro del header -->
@@ -122,12 +159,14 @@
 
       <button onclick="applyWebhook()">Activar Webhook</button>
       <button onclick="checkWebhook()">Consultar Webhook</button>
+      <div id="webhookResult">Sin resultados aún.</div>
 
       <hr style="margin:20px 0;">
 
       <h3>Balance</h3>
       <div id="balanceDisplay">No consultado</div>
       <button onclick="consultBalance()">Consultar Saldo</button>
+      <div id="configStatus">Esperando acción.</div>
 
       <br><br>
       <button onclick="closeSettings()">Cerrar</button>

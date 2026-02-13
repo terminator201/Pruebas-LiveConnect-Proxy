@@ -1,5 +1,33 @@
 let currentConversation = null;
 
+function renderConfigStatus(text, isError = false) {
+  const statusEl = document.getElementById("configStatus");
+  if (!statusEl) return;
+  statusEl.innerText = text;
+  statusEl.className = isError ? "error" : "ok";
+}
+
+function getBalanceValue(payload) {
+  if (!payload || typeof payload !== "object") return null;
+
+  const direct = payload.balance;
+  if (typeof direct === "number") return direct;
+
+  if (payload.data && typeof payload.data.balance === "number") {
+    return payload.data.balance;
+  }
+
+  if (
+    payload.result &&
+    payload.result.data &&
+    typeof payload.result.data.balance === "number"
+  ) {
+    return payload.result.data.balance;
+  }
+
+  return null;
+}
+
 /* =========================
    CONVERSACIONES
 ========================= */
@@ -112,7 +140,14 @@ async function transferConversation() {
 async function checkBalance() {
   const res = await fetch("/balance");
   const data = await res.json();
-  alert(`Saldo disponible: $${data.data.balance}`);
+  const balance = getBalanceValue(data);
+
+  if (balance === null) {
+    alert("No fue posible interpretar el saldo. Revisa el panel de configuración.");
+    return;
+  }
+
+  alert(`Saldo disponible: $${balance}`);
 }
 
 /* =========================
@@ -140,45 +175,94 @@ async function applyWebhook() {
   const id_canal = parseInt(document.getElementById("canalId").value);
   const url = document.getElementById("webhookUrl").value;
   const secret = document.getElementById("secret").value;
+  const resultEl = document.getElementById("webhookResult");
 
-  const res = await fetch("/config/setWebhook", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      id_canal,
-      estado: true,
-      url,
-      secret
-    })
-  });
+  if (!id_canal || !url || !secret) {
+    renderConfigStatus("Debes completar ID canal, URL y secret.", true);
+    return;
+  }
 
-  const data = await res.json();
-  alert("Webhook configurado");
+  try {
+    const res = await fetch("/config/setWebhook", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        id_canal,
+        estado: true,
+        url,
+        secret
+      })
+    });
+
+    const data = await res.json();
+    const ok = res.ok && data.ok !== false;
+
+    renderConfigStatus(
+      ok ? "Webhook configurado correctamente." : "Falló la configuración del webhook.",
+      !ok
+    );
+    if (resultEl) resultEl.innerText = JSON.stringify(data, null, 2);
+  } catch (e) {
+    renderConfigStatus(`Error de red: ${e.message}`, true);
+  }
 }
 
 /* Consultar Webhook */
 async function checkWebhook() {
   const id_canal = parseInt(document.getElementById("canalId").value);
+  const resultEl = document.getElementById("webhookResult");
 
-  const res = await fetch("/config/getWebhook", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ id_canal })
-  });
+  if (!id_canal) {
+    renderConfigStatus("Debes ingresar un ID de canal válido.", true);
+    return;
+  }
 
-  const data = await res.json();
-  alert(JSON.stringify(data, null, 2));
+  try {
+    const res = await fetch("/config/getWebhook", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ id_canal })
+    });
+
+    const data = await res.json();
+    const ok = res.ok && data.ok !== false;
+
+    renderConfigStatus(
+      ok ? "Consulta de webhook completada." : "La consulta de webhook devolvió error.",
+      !ok
+    );
+    if (resultEl) resultEl.innerText = JSON.stringify(data, null, 2);
+  } catch (e) {
+    renderConfigStatus(`Error de red: ${e.message}`, true);
+  }
 }
 
 /* Consultar Balance */
 async function consultBalance() {
-  const res = await fetch("/config/balance");
-  const data = await res.json();
+  try {
+    const res = await fetch("/config/balance");
+    const data = await res.json();
+    const balance = getBalanceValue(data);
+    const display = document.getElementById("balanceDisplay");
+    const ok = res.ok && data.ok !== false;
 
-  document.getElementById("balanceDisplay").innerText =
-    `Saldo actual: $${data.data.balance}`;
+    if (!display) return;
 
-  // aquí puedes llamar endpoint que lo guarde en DB si quieres persistencia
+    if (balance === null) {
+      display.innerText = "No se pudo obtener un valor de saldo válido.";
+      renderConfigStatus("No se pudo interpretar el balance de la API.", true);
+      return;
+    }
+
+    display.innerText = `Saldo actual: $${balance}`;
+    renderConfigStatus(
+      ok ? "Balance consultado correctamente." : "Balance consultado con advertencias.",
+      !ok
+    );
+  } catch (e) {
+    document.getElementById("balanceDisplay").innerText = "Error de red consultando balance.";
+    renderConfigStatus(`Error de red: ${e.message}`, true);
+  }
 }
 
 /* =========================
