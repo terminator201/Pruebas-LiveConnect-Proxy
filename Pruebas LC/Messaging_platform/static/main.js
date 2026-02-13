@@ -1,4 +1,15 @@
 let currentConversation = null;
+const CHANNEL_TYPES = {
+  1: "WhatsApp QR",
+  2: "Sitio Web",
+  3: "Facebook",
+  4: "Instagram",
+  5: "Telegram",
+  6: "Email",
+  7: "WhatsApp Business API",
+  8: "LinkedIn",
+  9: "Google My Business"
+};
 
 function renderConfigStatus(text, isError = false) {
   const statusEl = document.getElementById("configStatus");
@@ -26,6 +37,50 @@ function getBalanceValue(payload) {
   }
 
   return null;
+}
+
+function getChannelTypeLabel(tipo) {
+  return CHANNEL_TYPES[tipo] || `Tipo ${tipo}`;
+}
+
+async function loadChannels() {
+  const select = document.getElementById("channelSelect");
+  const canalInput = document.getElementById("canalId");
+  if (!select || !canalInput) return;
+
+  select.innerHTML = '<option value="">Cargando canales...</option>';
+
+  try {
+    const res = await fetch("/config/channels?visible=1");
+    const data = await res.json();
+    const channels = Array.isArray(data.data) ? data.data : [];
+    const ok = res.ok && data.ok !== false;
+
+    if (!ok) {
+      select.innerHTML = '<option value="">Error cargando canales</option>';
+      renderConfigStatus("No se pudieron cargar los canales.", true);
+      return;
+    }
+
+    if (channels.length === 0) {
+      select.innerHTML = '<option value="">No hay canales disponibles</option>';
+      renderConfigStatus("No hay canales visibles para configurar webhook.", true);
+      return;
+    }
+
+    select.innerHTML = '<option value="">Selecciona un canal</option>';
+    channels.forEach(channel => {
+      const option = document.createElement("option");
+      option.value = String(channel.id);
+      option.innerText = `#${channel.id} - ${getChannelTypeLabel(channel.tipo)} - ${channel.uid || "sin uid"} - ${channel.estado === 1 ? "activo" : "inactivo"}`;
+      select.appendChild(option);
+    });
+
+    renderConfigStatus("Canales cargados correctamente.");
+  } catch (e) {
+    select.innerHTML = '<option value="">Error de red</option>';
+    renderConfigStatus(`Error de red al cargar canales: ${e.message}`, true);
+  }
 }
 
 /* =========================
@@ -154,25 +209,10 @@ async function checkBalance() {
    Configuraciones
 ========================= */
 
-/* Abrir panel */
-function openSettings() {
-  document.getElementById("settingsPanel").style.display = "block";
-}
-
-function closeSettings() {
-  document.getElementById("settingsPanel").style.display = "none";
-}
-
-window.onclick = function(event) {
-  const modal = document.getElementById("settingsPanel");
-  if (event.target === modal) {
-    modal.style.display = "none";
-  }
-}
-
 /* Activar Webhook */
 async function applyWebhook() {
-  const id_canal = parseInt(document.getElementById("canalId").value);
+  const channelSelect = document.getElementById("channelSelect");
+  const id_canal = parseInt(channelSelect?.value || document.getElementById("canalId").value);
   const url = document.getElementById("webhookUrl").value;
   const secret = document.getElementById("secret").value;
   const resultEl = document.getElementById("webhookResult");
@@ -209,7 +249,8 @@ async function applyWebhook() {
 
 /* Consultar Webhook */
 async function checkWebhook() {
-  const id_canal = parseInt(document.getElementById("canalId").value);
+  const channelSelect = document.getElementById("channelSelect");
+  const id_canal = parseInt(channelSelect?.value || document.getElementById("canalId").value);
   const resultEl = document.getElementById("webhookResult");
 
   if (!id_canal) {
@@ -271,3 +312,28 @@ async function consultBalance() {
 
 loadConversations();
 setInterval(loadConversations, 5000);
+
+const channelSelect = document.getElementById("channelSelect");
+if (channelSelect) {
+  channelSelect.addEventListener("change", (event) => {
+    const canalInput = document.getElementById("canalId");
+    if (!canalInput) return;
+    canalInput.value = event.target.value || "";
+  });
+}
+
+function openSettings() {
+  document.getElementById("settingsPanel").style.display = "block";
+  loadChannels();
+}
+
+function closeSettings() {
+  document.getElementById("settingsPanel").style.display = "none";
+}
+
+window.onclick = function(event) {
+  const modal = document.getElementById("settingsPanel");
+  if (event.target === modal) {
+    closeSettings();
+  }
+}

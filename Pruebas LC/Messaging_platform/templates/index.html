@@ -153,6 +153,13 @@
       <h2>Configuración Proxy</h2>
 
       <h3>Webhook</h3>
+      <label for="channelSelect">Canales disponibles</label>
+      <select id="channelSelect" style="width:100%; margin:6px 0 10px;">
+        <option value="">Sin cargar</option>
+      </select>
+      <button onclick="loadChannels()">Recargar canales</button>
+      <br><br>
+      <label for="canalId">ID Canal (manual/respaldo)</label>
       <input id="canalId" placeholder="ID Canal" style="width:100%; margin-bottom:10px;" />
       <input id="webhookUrl" placeholder="URL Webhook" style="width:100%; margin-bottom:10px;" />
       <input id="secret" placeholder="Secret" style="width:100%; margin-bottom:10px;" />

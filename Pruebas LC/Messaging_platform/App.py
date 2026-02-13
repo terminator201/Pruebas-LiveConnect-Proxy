@@ -9,6 +9,7 @@ from metodos.SendQuickAnswer import send_quick_answer
 from metodos.SendFile import send_file
 from metodos.Transfer import transfer
 from metodos.Balance import get_balance
+from metodos.Channels import get_channels
 from Inbox.conversations import get_conversations
 from Inbox.messages import get_messages
 from DB.database import init_db
@@ -51,6 +52,12 @@ def config_get_webhook():
 @app.route("/config/balance", methods=["GET"])
 def config_balance():
     result = get_balance()
+    return jsonify(result), _status_from_result(result)
+
+@app.route("/config/channels", methods=["GET"])
+def config_channels():
+    filters = request.args.to_dict()
+    result = get_channels(filters)
     return jsonify(result), _status_from_result(result)
 
 @app.route("/messages/<conversation_id>", methods=["GET"])
