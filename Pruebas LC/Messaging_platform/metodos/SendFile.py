@@ -4,6 +4,18 @@ from metodos.Token import obtener_token
 from DB.database import save_message
 
 
+def _normalize_text(value):
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float, bool)):
+        return str(value).strip()
+    return ""
+
+
+def _normalize_extension(value):
+    return _normalize_text(value).lower().lstrip(".")
+
+
 def _normalize_response(response):
     try:
         payload = response.json()
@@ -21,15 +33,17 @@ def send_file(data):
     if not isinstance(data, dict):
         return {"ok": False, "status_code": 400, "error": "Payload JSON invalido"}
 
-    conversation_id = str(data.get("id_conversacion", "")).strip()
-    file_url = str(data.get("url", "")).strip()
-    file_name = str(data.get("nombre", "")).strip()
-    extension = str(data.get("extension", "")).strip().lower().lstrip(".")
+    conversation_id = _normalize_text(data.get("id_conversacion"))
+    file_url = _normalize_text(data.get("url"))
+    file_name = _normalize_text(data.get("nombre"))
+    extension = _normalize_extension(data.get("extension"))
 
     if not conversation_id:
         return {"ok": False, "status_code": 400, "error": "id_conversacion es requerido"}
     if not file_url:
         return {"ok": False, "status_code": 400, "error": "url es requerido"}
+    if not re.fullmatch(r"https?://\S+", file_url):
+        return {"ok": False, "status_code": 400, "error": "url invalida"}
     if not file_name:
         return {"ok": False, "status_code": 400, "error": "nombre es requerido"}
     if not extension:
@@ -67,13 +81,27 @@ def send_file(data):
     response_payload = _normalize_response(res)
 
     if res.ok:
-        canal = str(data.get("canal", "proxy"))
+        canal = str(data.get("canal") or data.get("id_canal") or "proxy").strip()
         final_name = file_name
         suffix = f".{extension}"
         if not file_name.lower().endswith(suffix):
             final_name = f"{file_name}{suffix}"
         try:
-            save_message(conversation_id, canal, "agent", f"[Archivo] {final_name}")
+            save_message(
+                conversation_id=conversation_id,
+                canal=canal,
+                sender="agent",
+                message=f"Archivo enviado: {final_name}",
+                message_type="file",
+                file_url=file_url,
+                file_name=final_name,
+                file_ext=extension,
+                metadata={
+                    "source": "sendFile",
+                    "nombre": final_name,
+                    "extension": extension,
+                },
+            )
         except Exception as error:
             warnings = response_payload.get("warnings")
             if not isinstance(warnings, list):

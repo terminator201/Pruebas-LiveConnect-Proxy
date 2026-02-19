@@ -36,7 +36,11 @@
       <div class="row-actions">
         <button type="button" data-action="activateWebhook">Activar Proxy</button>
         <button type="button" data-action="deactivateWebhook">Desactivar Proxy</button>
+        <button type="button" data-action="checkWebhook">Consultar Webhook</button>
       </div>
+      <div id="webhookCheckSummary">Estado actual: no consultado
+URL configurada: no consultada
+Mensaje API: no consultado</div>
       <div id="webhookResult">Sin resultados aún.</div>
 
       <hr class="section-divider">
@@ -98,7 +102,29 @@
     <div id="top-actions">
       <button type="button" data-action="checkBalance">Saldo</button>
       <button type="button" data-action="sendQuickAnswer">QuickAnswer</button>
+      <button type="button" data-action="toggleFileComposer">Enviar Archivo</button>
       <button type="button" data-action="transferConversation">Transferir</button>
+    </div>
+
+    <div id="fileComposer" hidden style="padding: 10px 12px; border-bottom: 1px solid #dbe3ef; background: #f8fafc; display: grid; gap: 8px;">
+      <input id="chatFileUrl" placeholder="URL pública del archivo (https://...)" />
+      <div style="display: grid; grid-template-columns: 1fr 140px auto; gap: 8px;">
+        <input id="chatFileName" placeholder="Nombre archivo" />
+        <select id="chatFileExtension">
+          <option value="">Extensión</option>
+          <option value="pdf">pdf</option>
+          <option value="jpg">jpg</option>
+          <option value="jpeg">jpeg</option>
+          <option value="png">png</option>
+          <option value="doc">doc</option>
+          <option value="docx">docx</option>
+          <option value="xls">xls</option>
+          <option value="xlsx">xlsx</option>
+          <option value="csv">csv</option>
+          <option value="txt">txt</option>
+        </select>
+        <button type="button" data-action="sendFile">Enviar</button>
+      </div>
     </div>
 
     <div id="messages"></div>
@@ -106,6 +132,14 @@
     <div id="input-box">
       <input id="messageInput" placeholder="Escribe un mensaje..." />
       <button type="button" data-action="sendMessage">Enviar</button>
+    </div>
+  </div>
+
+  <div id="imageModal" hidden style="position: fixed; inset: 0; z-index: 1200; background: rgba(2, 6, 23, 0.86); display: none; align-items: center; justify-content: center; padding: 20px;">
+    <div style="max-width: min(92vw, 900px); max-height: 90vh; display: grid; gap: 10px; justify-items: center;">
+      <img id="imageModalImage" alt="Previsualizacion de imagen" style="max-width: 100%; max-height: 80vh; border-radius: 12px; border: 1px solid rgba(255,255,255,0.25); box-shadow: 0 18px 36px rgba(0,0,0,0.45);" />
+      <a id="imageModalOpenLink" href="#" target="_blank" rel="noopener noreferrer" style="display: inline-block; background: #e2e8f0; color: #0f172a; padding: 8px 12px; border-radius: 8px; text-decoration: none; font-weight: 600;">Abrir en pestaña nueva</a>
+      <button id="imageModalCloseBtn" type="button" data-action="closeImageModal" style="background: #334155; color: #fff; padding: 8px 12px; border-radius: 8px; font-weight: 600;">Cerrar</button>
     </div>
   </div>
 

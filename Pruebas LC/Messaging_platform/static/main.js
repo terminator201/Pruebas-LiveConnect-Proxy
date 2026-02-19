@@ -50,9 +50,18 @@ const dom = {
   canalId: document.getElementById("canalId"),
   webhookUrl: document.getElementById("webhookUrl"),
   secret: document.getElementById("secret"),
+  webhookCheckSummary: document.getElementById("webhookCheckSummary"),
   webhookResult: document.getElementById("webhookResult"),
   configStatus: document.getElementById("configStatus"),
   balanceDisplay: document.getElementById("balanceDisplay"),
+  fileComposer: document.getElementById("fileComposer"),
+  imageModal: document.getElementById("imageModal"),
+  imageModalImage: document.getElementById("imageModalImage"),
+  imageModalOpenLink: document.getElementById("imageModalOpenLink"),
+  imageModalCloseBtn: document.getElementById("imageModalCloseBtn"),
+  chatFileUrl: document.getElementById("chatFileUrl"),
+  chatFileName: document.getElementById("chatFileName"),
+  chatFileExtension: document.getElementById("chatFileExtension"),
   fileUrl: document.getElementById("fileUrl"),
   fileName: document.getElementById("fileName"),
   fileExtension: document.getElementById("fileExtension"),
@@ -143,6 +152,106 @@ function getBalanceValue(payload) {
   return findAmountDeep(payload);
 }
 
+function findFieldDeep(node, candidateKeys, depth = 0) {
+  if (depth > 8 || node === null || node === undefined) return undefined;
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const found = findFieldDeep(item, candidateKeys, depth + 1);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+
+  if (typeof node !== "object") return undefined;
+
+  for (const key of candidateKeys) {
+    if (Object.prototype.hasOwnProperty.call(node, key)) {
+      return node[key];
+    }
+  }
+
+  for (const value of Object.values(node)) {
+    const found = findFieldDeep(value, candidateKeys, depth + 1);
+    if (found !== undefined) return found;
+  }
+
+  return undefined;
+}
+
+function resolveWebhookState(rawState, rawMessage, url) {
+  if (typeof rawState === "boolean") {
+    return rawState ? "activo" : "inactivo";
+  }
+  if (typeof rawState === "number") {
+    return rawState === 1 ? "activo" : "inactivo";
+  }
+
+  const stateText = normalizeText(rawState).toLowerCase();
+  if (stateText) {
+    if (stateText.includes("eliminad")) return "eliminado";
+    if (["1", "true", "on", "activo", "active", "enabled", "habilitado"].includes(stateText)) {
+      return "activo";
+    }
+    if (["0", "false", "off", "inactivo", "inactive", "disabled", "deshabilitado"].includes(stateText)) {
+      return "inactivo";
+    }
+  }
+
+  const messageText = normalizeText(rawMessage).toLowerCase();
+  if (messageText.includes("eliminad")) return "eliminado";
+  if (!normalizeText(url) && messageText.includes("sin webhook")) return "inactivo";
+
+  return "desconocido";
+}
+
+function extractWebhookSummary(payload) {
+  const rawState = findFieldDeep(payload, [
+    "estado",
+    "status",
+    "active",
+    "activo",
+    "enabled",
+    "is_active",
+    "webhook_status"
+  ]);
+  const rawUrl = findFieldDeep(payload, [
+    "url",
+    "webhook_url",
+    "webhookUrl",
+    "callback_url",
+    "uri"
+  ]);
+  const rawMessage = findFieldDeep(payload, [
+    "mensaje",
+    "message",
+    "detalle",
+    "detail",
+    "descripcion",
+    "description",
+    "error"
+  ]);
+
+  const url = normalizeText(rawUrl);
+  const message = normalizeText(rawMessage);
+  const estado = resolveWebhookState(rawState, rawMessage, rawUrl);
+
+  return {
+    estado,
+    url: url || "(sin URL configurada)",
+    mensaje: message || "(sin mensaje de API)"
+  };
+}
+
+function renderWebhookCheckSummary(summary) {
+  if (!dom.webhookCheckSummary || !summary) return;
+  dom.webhookCheckSummary.innerText = [
+    `Estado actual: ${summary.estado}`,
+    `URL configurada: ${summary.url}`,
+    `Mensaje API: ${summary.mensaje}`
+  ].join("\n");
+}
+
 function getChannelTypeLabel(tipo) {
   return CHANNEL_TYPES[tipo] || `Tipo ${tipo}`;
 }
@@ -187,6 +296,342 @@ function renderConversationList(conversations) {
   dom.sidebar.appendChild(fragment);
 }
 
+function normalizeText(value) {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value).trim();
+  return "";
+}
+
+function parseFileMessage(rawMessage) {
+  const normalized = normalizeText(rawMessage);
+  if (!normalized.startsWith("[FILE]|")) return null;
+
+  const parts = normalized.split("|");
+  const url = normalizeText(parts[1]);
+  if (!url) return null;
+
+  const name = normalizeText(parts[2] || "");
+  const extension = normalizeFileExtension(parts[3] || "");
+
+  return { url, name, extension };
+}
+
+function normalizeMetadata(value) {
+  if (value && typeof value === "object") return value;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && typeof parsed === "object") return parsed;
+    } catch (_error) {
+      return { raw: trimmed };
+    }
+    return { raw: trimmed };
+  }
+  return null;
+}
+
+function extractUrls(text) {
+  const normalized = normalizeText(text);
+  if (!normalized) return [];
+  const matches = normalized.match(/https?:\/\/[^\s]+/gi) || [];
+  const unique = [];
+  matches.forEach((url) => {
+    const clean = String(url).trim().replace(/[),.;!?]+$/g, "");
+    if (clean && !unique.includes(clean)) unique.push(clean);
+  });
+  return unique;
+}
+
+function getUrlExtension(url) {
+  try {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split("/");
+    const lastPart = segments[segments.length - 1] || "";
+    const dotIndex = lastPart.lastIndexOf(".");
+    if (dotIndex === -1) return "";
+    return normalizeFileExtension(lastPart.slice(dotIndex + 1));
+  } catch (_error) {
+    return "";
+  }
+}
+
+function inferFileUrlFromUrls(urls) {
+  for (const url of urls) {
+    const extension = getUrlExtension(url);
+    if (extension && ALLOWED_FILE_EXTENSIONS.includes(extension)) {
+      return url;
+    }
+  }
+  return "";
+}
+
+function removeUrlFromText(text, url) {
+  const normalizedText = normalizeText(text);
+  const normalizedUrl = normalizeText(url);
+  if (!normalizedText || !normalizedUrl) return normalizedText;
+  const escaped = normalizedUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return normalizedText
+    .replace(new RegExp(escaped, "g"), "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function isImageExtension(extension) {
+  return ["jpg", "jpeg", "png", "webp", "gif", "bmp"].includes(extension);
+}
+
+function openImageModal(url) {
+  if (!dom.imageModal || !dom.imageModalImage || !dom.imageModalOpenLink) return;
+  if (!url) return;
+
+  dom.imageModalImage.src = url;
+  dom.imageModalOpenLink.href = url;
+  dom.imageModal.removeAttribute("hidden");
+  dom.imageModal.style.display = "flex";
+}
+
+function closeImageModal() {
+  if (!dom.imageModal || !dom.imageModalImage || !dom.imageModalOpenLink) return;
+  dom.imageModal.setAttribute("hidden", "hidden");
+  dom.imageModal.style.display = "none";
+  dom.imageModalImage.src = "";
+  dom.imageModalOpenLink.href = "#";
+}
+
+function appendTextWithLinks(container, text) {
+  const normalized = normalizeText(text);
+  if (!normalized) return;
+
+  const regex = /https?:\/\/[^\s]+/gi;
+  let currentIndex = 0;
+
+  for (const match of normalized.matchAll(regex)) {
+    const matchedText = match[0];
+    const startIndex = match.index || 0;
+    const rawUrl = matchedText.replace(/[),.;!?]+$/g, "");
+
+    if (startIndex > currentIndex) {
+      container.appendChild(document.createTextNode(normalized.slice(currentIndex, startIndex)));
+    }
+
+    const link = document.createElement("a");
+    link.href = rawUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.innerText = rawUrl;
+    link.style.color = "#0369a1";
+    link.style.wordBreak = "break-all";
+    container.appendChild(link);
+
+    currentIndex = startIndex + matchedText.length;
+  }
+
+  if (currentIndex < normalized.length) {
+    container.appendChild(document.createTextNode(normalized.slice(currentIndex)));
+  }
+}
+
+function buildLinkPreview(url) {
+  const card = document.createElement("div");
+  card.style.marginTop = "8px";
+  card.style.padding = "8px 10px";
+  card.style.border = "1px solid #cbd5e1";
+  card.style.borderRadius = "10px";
+  card.style.background = "rgba(255,255,255,0.75)";
+
+  const label = document.createElement("div");
+  label.innerText = "Enlace";
+  label.style.fontSize = "12px";
+  label.style.fontWeight = "700";
+  label.style.color = "#334155";
+
+  const link = document.createElement("a");
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  link.innerText = url;
+  link.style.display = "block";
+  link.style.marginTop = "4px";
+  link.style.color = "#0369a1";
+  link.style.wordBreak = "break-all";
+
+  card.appendChild(label);
+  card.appendChild(link);
+  return card;
+}
+
+function buildFilePreview({ fileUrl, fileName, fileExt }) {
+  const card = document.createElement("div");
+  card.style.marginTop = "8px";
+  card.style.padding = "10px";
+  card.style.border = "1px solid #cbd5e1";
+  card.style.borderRadius = "10px";
+  card.style.background = "rgba(255,255,255,0.8)";
+  card.style.display = "grid";
+  card.style.gap = "8px";
+
+  const title = document.createElement("div");
+  title.innerText = fileName || "Archivo compartido";
+  title.style.fontWeight = "700";
+  title.style.color = "#0f172a";
+  title.style.wordBreak = "break-word";
+  card.appendChild(title);
+
+  const resolvedExtension = normalizeFileExtension(fileExt || getUrlExtension(fileUrl));
+  const isImage = fileUrl && isImageExtension(resolvedExtension);
+
+  if (fileUrl) {
+    const urlLink = document.createElement("a");
+    urlLink.href = fileUrl;
+    urlLink.target = "_blank";
+    urlLink.rel = "noopener noreferrer";
+    urlLink.innerText = fileUrl;
+    urlLink.style.color = "#0369a1";
+    urlLink.style.wordBreak = "break-all";
+    urlLink.style.fontSize = "12px";
+    if (isImage) {
+      urlLink.addEventListener("click", (event) => {
+        event.preventDefault();
+        openImageModal(fileUrl);
+      });
+    }
+    card.appendChild(urlLink);
+
+    const actions = document.createElement("div");
+    actions.style.display = "flex";
+    actions.style.flexWrap = "wrap";
+    actions.style.gap = "8px";
+
+    if (isImage) {
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.innerText = "Abrir archivo";
+      openButton.style.background = "#dbeafe";
+      openButton.style.color = "#1e3a8a";
+      openButton.style.padding = "6px 10px";
+      openButton.style.borderRadius = "8px";
+      openButton.style.fontWeight = "600";
+      openButton.addEventListener("click", () => openImageModal(fileUrl));
+      actions.appendChild(openButton);
+    }
+
+    const downloadLink = document.createElement("a");
+    downloadLink.href = fileUrl;
+    downloadLink.target = "_blank";
+    downloadLink.rel = "noopener noreferrer";
+    downloadLink.innerText = "Descargar archivo";
+    downloadLink.style.display = "inline-block";
+    downloadLink.style.padding = "6px 10px";
+    downloadLink.style.borderRadius = "8px";
+    downloadLink.style.background = "#e0f2fe";
+    downloadLink.style.color = "#075985";
+    downloadLink.style.textDecoration = "none";
+    downloadLink.style.fontWeight = "600";
+    actions.appendChild(downloadLink);
+
+    card.appendChild(actions);
+  }
+
+  return card;
+}
+
+function buildMetadataPreview(metadata) {
+  if (!metadata || typeof metadata !== "object") return null;
+
+  const details = document.createElement("details");
+  details.style.marginTop = "8px";
+  details.style.border = "1px dashed #94a3b8";
+  details.style.borderRadius = "8px";
+  details.style.padding = "6px 8px";
+  details.style.background = "rgba(248,250,252,0.8)";
+
+  const summary = document.createElement("summary");
+  summary.innerText = "Metadata";
+  summary.style.cursor = "pointer";
+  summary.style.fontWeight = "600";
+  summary.style.color = "#334155";
+
+  const pre = document.createElement("pre");
+  pre.style.margin = "8px 0 0";
+  pre.style.fontSize = "11px";
+  pre.style.whiteSpace = "pre-wrap";
+  pre.style.wordBreak = "break-word";
+  pre.style.color = "#0f172a";
+
+  const metadataText = JSON.stringify(metadata, null, 2);
+  pre.innerText = metadataText.length > 2000 ? `${metadataText.slice(0, 2000)}\n...` : metadataText;
+
+  details.appendChild(summary);
+  details.appendChild(pre);
+  return details;
+}
+
+function renderMessageBubble(item, messageItem) {
+  const rawMessageText = normalizeText(messageItem?.message);
+  const parsedFileMessage = parseFileMessage(rawMessageText);
+
+  let messageText = rawMessageText;
+  let fileUrl = normalizeText(messageItem?.file_url);
+  let fileName = normalizeText(messageItem?.file_name);
+  let fileExt = normalizeFileExtension(messageItem?.file_ext || "");
+
+  if (parsedFileMessage) {
+    fileUrl = parsedFileMessage.url || fileUrl;
+    fileName = parsedFileMessage.name || fileName;
+    fileExt = parsedFileMessage.extension || fileExt;
+    messageText = "";
+  }
+
+  const urls = extractUrls(messageText);
+  const detectedFileUrl = inferFileUrlFromUrls(urls);
+  if (!fileUrl && detectedFileUrl) {
+    fileUrl = detectedFileUrl;
+  }
+  if (!fileExt) {
+    fileExt = normalizeFileExtension(getUrlExtension(fileUrl));
+  }
+
+  const metadata = normalizeMetadata(messageItem?.metadata);
+
+  let messageType = normalizeText(messageItem?.message_type || "text").toLowerCase();
+  if (!["text", "file", "link", "structured"].includes(messageType)) {
+    messageType = "text";
+  }
+  if (messageType === "text" && fileUrl) messageType = "file";
+  if (messageType === "text" && urls.length > 0) messageType = "link";
+  if (messageType === "text" && metadata && Object.keys(metadata).length > 0) {
+    messageType = "structured";
+  }
+
+  let displayText = messageText;
+  if (fileUrl) {
+    displayText = removeUrlFromText(displayText, fileUrl);
+  }
+
+  if (displayText) {
+    const textNode = document.createElement("div");
+    textNode.style.whiteSpace = "pre-wrap";
+    textNode.style.wordBreak = "break-word";
+    appendTextWithLinks(textNode, displayText);
+    item.appendChild(textNode);
+  }
+
+  if (messageType === "link") {
+    urls.slice(0, 2).forEach((url) => item.appendChild(buildLinkPreview(url)));
+  }
+
+  if (fileUrl) {
+    item.appendChild(buildFilePreview({ fileUrl, fileName, fileExt }));
+  }
+
+  const metadataNode = buildMetadataPreview(metadata);
+  if (metadataNode) {
+    item.appendChild(metadataNode);
+  }
+}
+
 function renderMessageList(messages) {
   if (!dom.messages) return;
 
@@ -196,7 +641,10 @@ function renderMessageList(messages) {
   messages.forEach((messageItem) => {
     const item = document.createElement("div");
     item.className = `msg ${messageItem.sender === "usuario" ? "user" : "agent"}`;
-    item.innerText = messageItem.message;
+    item.style.display = "flex";
+    item.style.flexDirection = "column";
+    item.style.gap = "2px";
+    renderMessageBubble(item, messageItem);
     fragment.appendChild(item);
   });
 
@@ -224,6 +672,60 @@ function parseVariablesJSON(rawValue) {
 
 function normalizeFileExtension(value) {
   return String(value || "").trim().toLowerCase().replace(/^\./, "");
+}
+
+function isValidHttpUrl(value) {
+  try {
+    const parsed = new URL(String(value || "").trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch (_error) {
+    return false;
+  }
+}
+
+function inferExtensionFromUrl(url) {
+  const extension = getUrlExtension(url);
+  if (!extension) return "";
+  return ALLOWED_FILE_EXTENSIONS.includes(extension) ? extension : "";
+}
+
+function pickFirstFilled(values) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+  return "";
+}
+
+function getFileFormValues() {
+  const url = pickFirstFilled([dom.chatFileUrl?.value, dom.fileUrl?.value]);
+  const nombre = pickFirstFilled([dom.chatFileName?.value, dom.fileName?.value]);
+  const manualExtension = normalizeFileExtension(
+    pickFirstFilled([dom.chatFileExtension?.value, dom.fileExtension?.value])
+  );
+  const extension = manualExtension || inferExtensionFromUrl(url);
+
+  return { url, nombre, extension };
+}
+
+function clearFileFormValues() {
+  if (dom.chatFileUrl) dom.chatFileUrl.value = "";
+  if (dom.chatFileName) dom.chatFileName.value = "";
+  if (dom.chatFileExtension) dom.chatFileExtension.value = "";
+  if (dom.fileUrl) dom.fileUrl.value = "";
+  if (dom.fileName) dom.fileName.value = "";
+  if (dom.fileExtension) dom.fileExtension.value = "";
+}
+
+function toggleFileComposer() {
+  if (!dom.fileComposer) return;
+  const isHidden = dom.fileComposer.hasAttribute("hidden");
+  if (isHidden) {
+    dom.fileComposer.removeAttribute("hidden");
+    if (dom.chatFileUrl) dom.chatFileUrl.focus();
+    return;
+  }
+  dom.fileComposer.setAttribute("hidden", "hidden");
 }
 
 async function loadChannels() {
@@ -295,7 +797,12 @@ async function loadMessages(conversationId) {
 
     const normalizedMessages = messages.map((messageItem) => ({
       sender: messageItem?.sender === "usuario" ? "usuario" : "agent",
-      message: String(messageItem?.message || "")
+      message: normalizeText(messageItem?.message),
+      message_type: normalizeText(messageItem?.message_type || "text"),
+      file_url: normalizeText(messageItem?.file_url),
+      file_name: normalizeText(messageItem?.file_name),
+      file_ext: normalizeFileExtension(messageItem?.file_ext || ""),
+      metadata: normalizeMetadata(messageItem?.metadata)
     }));
 
     renderMessageList(normalizedMessages);
@@ -375,12 +882,14 @@ async function sendFile() {
   const conversationId = ensureCurrentConversation();
   if (!conversationId) return;
 
-  const url = dom.fileUrl?.value?.trim() || "";
-  const nombre = dom.fileName?.value?.trim() || "";
-  const extension = normalizeFileExtension(dom.fileExtension?.value || "");
+  const { url, nombre, extension } = getFileFormValues();
 
   if (!url) {
     renderConfigStatus("Debes ingresar la URL del archivo.", true);
+    return;
+  }
+  if (!isValidHttpUrl(url)) {
+    renderConfigStatus("La URL del archivo debe iniciar con http:// o https://", true);
     return;
   }
   if (!nombre) {
@@ -406,6 +915,8 @@ async function sendFile() {
     return;
   }
 
+  clearFileFormValues();
+  if (dom.fileComposer) dom.fileComposer.setAttribute("hidden", "hidden");
   renderConfigStatus("Archivo enviado correctamente.");
   writeWebhookResult(data);
   await loadMessages(conversationId);
@@ -509,14 +1020,21 @@ async function checkWebhook() {
   try {
     const { res, data } = await postJSON("/config/getWebhook", { id_canal: idCanal });
     const ok = isApiSuccess(res, data);
+    const summary = extractWebhookSummary(data || {});
 
     renderConfigStatus(
-      ok ? "Consulta de webhook completada." : "La consulta de webhook devolvio error.",
+      ok ? `Consulta completada: webhook ${summary.estado}.` : "La consulta de webhook devolvio error.",
       !ok
     );
 
+    renderWebhookCheckSummary(summary);
     writeWebhookResult(data);
   } catch (error) {
+    renderWebhookCheckSummary({
+      estado: "error",
+      url: "(sin URL configurada)",
+      mensaje: `Error de red: ${error.message}`
+    });
     renderConfigStatus(`Error de red: ${error.message}`, true);
   }
 }
@@ -561,12 +1079,14 @@ function closeSettings() {
 const actionHandlers = Object.freeze({
   openSettings,
   closeSettings,
+  closeImageModal,
   loadChannels,
   activateWebhook,
   deactivateWebhook,
   checkWebhook,
   consultBalance,
   checkBalance,
+  toggleFileComposer,
   sendQuickAnswer,
   sendFile,
   transferConversation,
@@ -612,8 +1132,22 @@ function onSettingsBackdropClick(event) {
   }
 }
 
+function onImageModalClick(event) {
+  if (!dom.imageModal) return;
+  if (event.target === dom.imageModal) {
+    closeImageModal();
+  }
+}
+
+function onDocumentKeyDown(event) {
+  if (event.key === "Escape") {
+    closeImageModal();
+  }
+}
+
 function bindEvents() {
   document.addEventListener("click", onActionClick);
+  document.addEventListener("keydown", onDocumentKeyDown);
 
   if (dom.sidebar) {
     dom.sidebar.addEventListener("click", onConversationClick);
@@ -630,9 +1164,18 @@ function bindEvents() {
   if (dom.settingsPanel) {
     dom.settingsPanel.addEventListener("click", onSettingsBackdropClick);
   }
+
+  if (dom.imageModal) {
+    dom.imageModal.addEventListener("click", onImageModalClick);
+  }
+
+  if (dom.imageModalCloseBtn) {
+    dom.imageModalCloseBtn.addEventListener("click", closeImageModal);
+  }
 }
 
 function initApp() {
+  closeImageModal();
   bindEvents();
   loadConversations();
   setInterval(loadConversations, APP_CONFIG.conversationsPollMs);

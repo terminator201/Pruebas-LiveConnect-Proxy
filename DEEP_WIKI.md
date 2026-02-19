@@ -226,3 +226,302 @@ Basado en `main.js` y `App.py`:
   Body: según API LiveConnect
 - `/webhook/liveconnect`
   Body: `{ id_conversacion, mensaje, canal, sender }` (`id_conversacion` requerido)
+
+## Actualizacion funcional completa (19 de febrero de 2026)
+
+Esta seccion documenta las mejoras implementadas en webhook, persistencia, render frontend, envio de mensajes/archivos/quick answer y configuracion de webhook desde UI.
+
+### 1. Procesamiento del Webhook
+
+Archivo principal: `Pruebas LC/Messaging_platform/services/webhook_service.py`
+
+#### Estructura real del payload
+
+Ejemplo real recibido desde Proxy LiveConnect:
+
+```json
+{
+  "id_conversacion": "LCWAP|753|573178560023C",
+  "id_canal": 753,
+  "message": {
+    "texto": "",
+    "tipo": 1,
+    "file": {
+      "url": "https://storage.ejemplo.com/imagen.jpg",
+      "nombre": "imagen.jpg",
+      "extension": "jpg"
+    }
+  },
+  "contact_data": {
+    "name": "Brandon Gallego"
+  }
+}
+```
+
+#### Parseo aplicado
+
+- Texto: `message.texto`
+- Archivo: `message.file.url`, `message.file.name|nombre`, `message.file.ext|extension`
+- Contacto: `contact_data.name`
+
+Snippet relevante:
+
+```python
+def _extract_file_payload(data):
+    message_obj = _get_message_object(data)
+    file_obj = message_obj.get("file")
+    file_url = file_obj.get("url")
+    file_name = file_obj.get("name") or file_obj.get("nombre")
+    file_ext = file_obj.get("ext") or file_obj.get("extension")
+```
+
+#### Manejo de mensajes vacios
+
+- Si llega archivo, se construye un marcador persistible:
+  - `"[FILE]|url|nombre|extension"`
+- Si no hay texto ni archivo, el webhook se ignora:
+  - `{"status":"ignored","ok":true,"warning":"Mensaje vacio ignorado"}`
+
+Snippet relevante:
+
+```python
+def _build_incoming_message(message_text, file_payload):
+    file_marker = _build_file_marker(file_payload)
+    if file_marker:
+        return file_marker
+    if message_text:
+        return message_text
+    return ""
+```
+
+### 2. Persistencia de Mensajes
+
+Archivo: `Pruebas LC/Messaging_platform/DB/database.py`
+
+#### Funcionamiento de `save_message()`
+
+- Normaliza `conversation_id`, `sender`, `message`, `contact_name`.
+- Hace upsert de conversacion.
+- Inserta mensaje en `messages`.
+- Si no hay `message` textual pero hay archivo, usa fallback (`[Archivo]` o URL).
+- Rechaza insercion final si no hay contenido util.
+
+#### Campos almacenados
+
+Tabla `messages` actual:
+- `conversation_id`
+- `sender`
+- `message`
+- `message_type`
+- `file_url`
+- `file_name`
+- `file_ext`
+- `metadata`
+- `created_at`
+
+#### Diferencia de `sender`
+
+- `sender = "usuario"`: mensajes entrantes desde webhook.
+- `sender = "agent"`: mensajes enviados desde UI por `sendMessage`, `sendFile`, `sendQuickAnswer`.
+
+#### Convencion de archivos
+
+Para entrada por webhook se guarda:
+
+`[FILE]|url|nombre|extension`
+
+Ejemplo:
+
+`[FILE]|https://storage.ejemplo.com/imagen.jpg|imagen.jpg|jpg`
+
+### 3. Renderizado en Frontend
+
+Archivos:
+- `Pruebas LC/Messaging_platform/Inbox/messages.py`
+- `Pruebas LC/Messaging_platform/static/main.js`
+- `Pruebas LC/Messaging_platform/templates/index.html`
+
+#### Estructura devuelta por `get_messages`
+
+```json
+[
+  {
+    "sender": "usuario",
+    "message": "[FILE]|https://storage.ejemplo.com/imagen.jpg|imagen.jpg|jpg",
+    "message_type": "file",
+    "file_url": "https://storage.ejemplo.com/imagen.jpg",
+    "file_name": "imagen.jpg",
+    "file_ext": "jpg",
+    "metadata": {"tipo": 1}
+  }
+]
+```
+
+#### Deteccion de mensajes tipo archivo
+
+En `main.js` se parsea el prefijo:
+
+```javascript
+function parseFileMessage(rawMessage) {
+  const normalized = normalizeText(rawMessage);
+  if (!normalized.startsWith("[FILE]|")) return null;
+  const parts = normalized.split("|");
+  return { url: normalizeText(parts[1]), name: normalizeText(parts[2]), extension: normalizeFileExtension(parts[3]) };
+}
+```
+
+#### Render de tipos
+
+- Texto normal: burbuja tradicional.
+- Imagen: tarjeta de archivo + URL clickeable + boton `Abrir archivo` (abre modal).
+- Otros archivos: tarjeta con boton `Descargar archivo`.
+
+#### Modal flotante de imagen
+
+`index.html` agrega `#imageModal` con:
+- Fondo oscuro.
+- Imagen centrada (`#imageModalImage`).
+- Link `Abrir en pestana nueva`.
+- Boton `Cerrar`.
+
+`main.js` controla apertura/cierre con:
+- click en URL o boton abrir.
+- click fuera del contenido.
+- tecla `Esc`.
+- boton `Cerrar`.
+
+### 4. Envio de Mensajes
+
+Archivo: `Pruebas LC/Messaging_platform/metodos/SendMessage.py`
+
+#### Implementacion `proxy/sendMessage`
+
+Payload enviado:
+
+```json
+{
+  "id_conversacion": "LCWAP|753|573178560023C",
+  "mensaje": "Hola"
+}
+```
+
+#### Persistencia posterior
+
+Cuando la API responde OK:
+- se guarda en DB como `sender = "agent"`.
+- se registra el texto enviado para verlo en el inbox local.
+
+### 5. Envio de Archivos
+
+Archivo: `Pruebas LC/Messaging_platform/metodos/SendFile.py`
+
+#### Implementacion `proxy/sendFile`
+
+Payload oficial:
+
+```json
+{
+  "id_conversacion": "LCWAP|753|573178560023C",
+  "url": "https://storage.ejemplo.com/documento.pdf",
+  "nombre": "documento",
+  "extension": "pdf"
+}
+```
+
+#### Validaciones frontend (`main.js`)
+
+- URL obligatoria y valida (`http://` o `https://`).
+- Nombre obligatorio.
+- Extension dentro de `ALLOWED_FILE_EXTENSIONS`.
+- Se permite inferir extension desde URL cuando aplica.
+
+#### Persistencia local
+
+Cuando el envio es exitoso:
+- `sender = "agent"`
+- `message_type = "file"`
+- se guarda `file_url`, `file_name`, `file_ext`, `metadata`.
+
+### 6. QuickAnswer Dinamico
+
+Archivo: `Pruebas LC/Messaging_platform/metodos/SendQuickAnswer.py`
+
+#### Uso de `id_respuesta`
+
+- Se valida que sea numerico (`int`).
+- Se envia junto a `id_conversacion` y `variables`.
+
+#### Variables dinamicas
+
+- `variables` debe ser objeto JSON.
+- Se acepta texto con placeholders para construir un registro visual dinamico.
+
+#### Persistencia visual
+
+Al responder OK:
+- se guarda en DB como `sender = "agent"`.
+- el texto se construye por prioridad:
+  1. plantilla custom (`registro_visual` / `mensaje_visual`)
+  2. texto detectado en respuesta API
+  3. fallback `QuickAnswer {id}` + resumen de variables
+
+### 7. Configuracion del Webhook desde UI
+
+Archivos:
+- `Pruebas LC/Messaging_platform/templates/index.html`
+- `Pruebas LC/Messaging_platform/static/main.js`
+- `Pruebas LC/Messaging_platform/metodos/GetWebhook.py`
+- `Pruebas LC/Messaging_platform/App.py`
+
+#### `proxy/setWebhook` (activar/desactivar)
+
+- Botones:
+  - `Activar Proxy`
+  - `Desactivar Proxy`
+- Requieren `id_canal`.
+- Para activar, `url` es obligatoria.
+
+#### Nuevo boton de consulta `proxy/getWebhook`
+
+Boton en modal de configuracion:
+- `Consultar Webhook`
+
+Flujo:
+1. toma `id_canal` del selector/campo manual.
+2. llama `POST /config/getWebhook`.
+3. renderiza en UI:
+   - `Estado actual` (activo/inactivo/eliminado/desconocido)
+   - `URL configurada`
+   - `Mensaje API`
+4. mantiene JSON completo en `#webhookResult`.
+
+Snippet de presentacion:
+
+```javascript
+renderWebhookCheckSummary({
+  estado: "activo",
+  url: "https://mi-webhook.com/liveconnect",
+  mensaje: "Consulta completada"
+});
+```
+
+### 8. Flujo general del sistema
+
+```mermaid
+flowchart LR
+  Canal["Canal (ej. WhatsApp)"] --> Proxy["Proxy LiveConnect"]
+  Proxy -->|Webhook POST| Flask["Flask /webhook/liveconnect"]
+  Flask --> Service["webhook_service.py"]
+  Service --> DB["SQLite (conversations/messages)"]
+  DB --> API["GET /conversations /messages/<id>"]
+  API --> Front["Frontend Inbox (index.html + main.js)"]
+```
+
+Paso a paso:
+1. El canal envia evento al Proxy.
+2. Proxy publica el webhook al backend Flask.
+3. El servicio parsea texto, archivo y contacto.
+4. Se persiste en SQLite.
+5. El frontend consulta mensajes por API interna.
+6. Se renderiza texto/archivo/link/metadata.
+7. Las acciones del agente (`sendMessage`, `sendFile`, `sendQuickAnswer`) se proxyan y se persisten para vista inmediata.
