@@ -1,5 +1,11 @@
-let currentConversation = null;
-const CHANNEL_TYPES = {
+const APP_CONFIG = Object.freeze({
+  conversationsPollMs: 5000,
+  defaultQuickAnswerId: 55050,
+  defaultTransferChannelId: 3918,
+  currencyLocale: "es-CO"
+});
+
+const CHANNEL_TYPES = Object.freeze({
   1: "WhatsApp QR",
   2: "Sitio Web",
   3: "Facebook",
@@ -9,13 +15,60 @@ const CHANNEL_TYPES = {
   7: "WhatsApp Business API",
   8: "LinkedIn",
   9: "Google My Business"
+});
+
+const UI_TEXT = Object.freeze({
+  invalidConversation: "Selecciona una conversacion primero.",
+  invalidBalance: "No fue posible interpretar el saldo. Revisa el panel de configuracion.",
+  transferSuccess: "Conversacion transferida a LiveConnect",
+  transferError: "No se pudo transferir la conversacion."
+});
+
+const state = {
+  currentConversation: null
+};
+
+const dom = {
+  sidebar: document.getElementById("sidebar"),
+  messages: document.getElementById("messages"),
+  messageInput: document.getElementById("messageInput"),
+  settingsPanel: document.getElementById("settingsPanel"),
+  channelSelect: document.getElementById("channelSelect"),
+  canalId: document.getElementById("canalId"),
+  webhookUrl: document.getElementById("webhookUrl"),
+  secret: document.getElementById("secret"),
+  webhookResult: document.getElementById("webhookResult"),
+  configStatus: document.getElementById("configStatus"),
+  balanceDisplay: document.getElementById("balanceDisplay")
 };
 
 function renderConfigStatus(text, isError = false) {
-  const statusEl = document.getElementById("configStatus");
-  if (!statusEl) return;
-  statusEl.innerText = text;
-  statusEl.className = isError ? "error" : "ok";
+  if (!dom.configStatus) return;
+  dom.configStatus.innerText = text;
+  dom.configStatus.className = isError ? "error" : "ok";
+}
+
+function isApiSuccess(res, data) {
+  return Boolean(res?.ok) && data?.ok !== false;
+}
+
+async function requestJSON(url, options = {}) {
+  const res = await fetch(url, options);
+  let data = null;
+  try {
+    data = await res.json();
+  } catch (_error) {
+    data = null;
+  }
+  return { res, data };
+}
+
+function postJSON(url, payload) {
+  return requestJSON(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
 }
 
 function toNumeric(value) {
@@ -71,301 +124,369 @@ function getChannelTypeLabel(tipo) {
   return CHANNEL_TYPES[tipo] || `Tipo ${tipo}`;
 }
 
-async function loadChannels() {
-  const select = document.getElementById("channelSelect");
-  const canalInput = document.getElementById("canalId");
-  if (!select || !canalInput) return;
+function getSelectedChannelId() {
+  const selectValue = dom.channelSelect?.value?.trim();
+  const manualValue = dom.canalId?.value?.trim();
+  const rawValue = selectValue || manualValue;
 
-  select.innerHTML = '<option value="">Cargando canales...</option>';
+  if (!rawValue) return null;
+
+  const parsed = Number.parseInt(rawValue, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function ensureCurrentConversation() {
+  if (!state.currentConversation) {
+    alert(UI_TEXT.invalidConversation);
+    return null;
+  }
+
+  return state.currentConversation;
+}
+
+function renderConversationList(conversations) {
+  if (!dom.sidebar) return;
+
+  dom.sidebar.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+
+  conversations.forEach((conversation) => {
+    const item = document.createElement("div");
+    item.className = "conversation";
+    if (conversation.id === state.currentConversation) {
+      item.classList.add("active");
+    }
+    item.dataset.conversationId = conversation.id;
+    item.innerText = conversation.id;
+    fragment.appendChild(item);
+  });
+
+  dom.sidebar.appendChild(fragment);
+}
+
+function renderMessageList(messages) {
+  if (!dom.messages) return;
+
+  dom.messages.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+
+  messages.forEach((messageItem) => {
+    const item = document.createElement("div");
+    item.className = `msg ${messageItem.sender === "usuario" ? "user" : "agent"}`;
+    item.innerText = messageItem.message;
+    fragment.appendChild(item);
+  });
+
+  dom.messages.appendChild(fragment);
+  dom.messages.scrollTop = dom.messages.scrollHeight;
+}
+
+async function loadChannels() {
+  if (!dom.channelSelect || !dom.canalId) return;
+
+  dom.channelSelect.innerHTML = '<option value="">Cargando canales...</option>';
 
   try {
-    const res = await fetch("/config/channels?visible=1");
-    const data = await res.json();
-    const channels = Array.isArray(data.data) ? data.data : [];
-    const ok = res.ok && data.ok !== false;
+    const { res, data } = await requestJSON("/config/channels?visible=1");
+    const channels = Array.isArray(data?.data) ? data.data : [];
 
-    if (!ok) {
-      select.innerHTML = '<option value="">Error cargando canales</option>';
+    if (!isApiSuccess(res, data)) {
+      dom.channelSelect.innerHTML = '<option value="">Error cargando canales</option>';
       renderConfigStatus("No se pudieron cargar los canales.", true);
       return;
     }
 
     if (channels.length === 0) {
-      select.innerHTML = '<option value="">No hay canales disponibles</option>';
+      dom.channelSelect.innerHTML = '<option value="">No hay canales disponibles</option>';
       renderConfigStatus("No hay canales visibles para configurar webhook.", true);
       return;
     }
 
-    select.innerHTML = '<option value="">Selecciona un canal</option>';
-    channels.forEach(channel => {
+    dom.channelSelect.innerHTML = '<option value="">Selecciona un canal</option>';
+    channels.forEach((channel) => {
       const option = document.createElement("option");
       option.value = String(channel.id);
       option.innerText = `#${channel.id} - ${getChannelTypeLabel(channel.tipo)} - ${channel.uid || "sin uid"} - ${channel.estado === 1 ? "activo" : "inactivo"}`;
-      select.appendChild(option);
+      dom.channelSelect.appendChild(option);
     });
 
     renderConfigStatus("Canales cargados correctamente.");
-  } catch (e) {
-    select.innerHTML = '<option value="">Error de red</option>';
-    renderConfigStatus(`Error de red al cargar canales: ${e.message}`, true);
+  } catch (error) {
+    dom.channelSelect.innerHTML = '<option value="">Error de red</option>';
+    renderConfigStatus(`Error de red al cargar canales: ${error.message}`, true);
   }
 }
 
-/* =========================
-   CONVERSACIONES
-========================= */
-
 async function loadConversations() {
-  const res = await fetch("/conversations");
-  const conversations = await res.json();
+  if (!dom.sidebar) return;
 
-  const sidebar = document.getElementById("sidebar");
-  sidebar.innerHTML = "";
-
-  conversations.forEach(c => {
-    const div = document.createElement("div");
-    div.className = "conversation";
-    div.innerText = c.id;
-    div.onclick = () => selectConversation(c.id, div);
-    sidebar.appendChild(div);
-  });
+  try {
+    const { data } = await requestJSON("/conversations");
+    const conversations = Array.isArray(data) ? data : [];
+    renderConversationList(conversations);
+  } catch (_error) {
+    dom.sidebar.innerHTML = '<div class="conversation">Error cargando conversaciones</div>';
+  }
 }
 
-async function selectConversation(id, element) {
-  currentConversation = id;
+async function selectConversation(conversationId, element) {
+  state.currentConversation = conversationId;
 
-  document.querySelectorAll(".conversation")
-    .forEach(c => c.classList.remove("active"));
+  document.querySelectorAll(".conversation").forEach((item) => item.classList.remove("active"));
+  if (element) {
+    element.classList.add("active");
+  }
 
-  element.classList.add("active");
-  loadMessages(id);
+  await loadMessages(conversationId);
 }
 
-/* =========================
-   MENSAJES
-========================= */
+async function loadMessages(conversationId) {
+  if (!dom.messages) return;
 
-async function loadMessages(id) {
-  const res = await fetch(`/messages/${id}`);
-  const messages = await res.json();
-
-  const container = document.getElementById("messages");
-  container.innerHTML = "";
-
-  messages.forEach(m => {
-    const div = document.createElement("div");
-    div.className = `msg ${m.sender === "usuario" ? "user" : "agent"}`;
-    div.innerText = m.message;
-    container.appendChild(div);
-  });
-
-  container.scrollTop = container.scrollHeight;
+  try {
+    const encodedId = encodeURIComponent(conversationId);
+    const { data } = await requestJSON(`/messages/${encodedId}`);
+    const messages = Array.isArray(data) ? data : [];
+    renderMessageList(messages);
+  } catch (_error) {
+    dom.messages.innerHTML = "";
+  }
 }
-
-/* =========================
-   ACCIONES
-========================= */
 
 async function sendMessage() {
-  const input = document.getElementById("messageInput");
-  const mensaje = input.value;
+  const conversationId = ensureCurrentConversation();
+  if (!conversationId || !dom.messageInput) return;
 
-  if (!mensaje || !currentConversation) return;
+  const message = dom.messageInput.value.trim();
+  if (!message) return;
 
-  await fetch("/sendMessage", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      id_conversacion: currentConversation,
-      mensaje
-    })
+  await postJSON("/sendMessage", {
+    id_conversacion: conversationId,
+    mensaje: message
   });
 
-  input.value = "";
-  loadMessages(currentConversation);
+  dom.messageInput.value = "";
+  await loadMessages(conversationId);
 }
 
-async function sendQuickAnswer(id_respuesta) {
-  if (!currentConversation) return;
+async function sendQuickAnswer(answerId = APP_CONFIG.defaultQuickAnswerId) {
+  const conversationId = ensureCurrentConversation();
+  if (!conversationId) return;
 
-  await fetch("/sendQuickAnswer", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      id_conversacion: currentConversation,
-      id_respuesta,
-      variables: {
-        "visitante.nombre": "Carolina"
-      }
-    })
+  await postJSON("/sendQuickAnswer", {
+    id_conversacion: conversationId,
+    id_respuesta: answerId,
+    variables: {
+      "visitante.nombre": "Carolina"
+    }
   });
 
-  loadMessages(currentConversation);
+  await loadMessages(conversationId);
 }
 
 async function transferConversation() {
-  if (!currentConversation) return;
+  const conversationId = ensureCurrentConversation();
+  if (!conversationId) return;
 
-  await fetch("/transfer", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      id_conversacion: currentConversation,
-      id_canal: 3918,
-      estado: 1,
-      mensaje: "Transferido desde Inbox Web"
-    })
+  const { res, data } = await postJSON("/transfer", {
+    id_conversacion: conversationId,
+    id_canal: APP_CONFIG.defaultTransferChannelId,
+    estado: 1,
+    mensaje: "Transferido desde Inbox Web"
   });
 
-  alert("Conversación transferida a LiveConnect");
+  if (!isApiSuccess(res, data)) {
+    alert(UI_TEXT.transferError);
+    return;
+  }
+
+  alert(UI_TEXT.transferSuccess);
 }
 
 async function checkBalance() {
-  const res = await fetch("/balance");
-  const data = await res.json();
+  const { data } = await requestJSON("/balance");
   const balance = getBalanceValue(data);
 
   if (balance === null) {
-    alert("No fue posible interpretar el saldo. Revisa el panel de configuración.");
+    alert(UI_TEXT.invalidBalance);
     return;
   }
 
   alert(`Saldo disponible: $${balance}`);
 }
 
-/* =========================
-   Configuraciones
-========================= */
-
-/* Activar Webhook */
 async function applyWebhook() {
-  const channelSelect = document.getElementById("channelSelect");
-  const id_canal = parseInt(channelSelect?.value || document.getElementById("canalId").value);
-  const url = document.getElementById("webhookUrl").value;
-  const secret = document.getElementById("secret").value;
-  const resultEl = document.getElementById("webhookResult");
+  const idCanal = getSelectedChannelId();
+  const url = dom.webhookUrl?.value?.trim();
+  const secret = dom.secret?.value?.trim();
 
-  if (!id_canal || !url || !secret) {
+  if (!idCanal || !url || !secret) {
     renderConfigStatus("Debes completar ID canal, URL y secret.", true);
     return;
   }
 
   try {
-    const res = await fetch("/config/setWebhook", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({
-        id_canal,
-        estado: true,
-        url,
-        secret
-      })
+    const { res, data } = await postJSON("/config/setWebhook", {
+      id_canal: idCanal,
+      estado: true,
+      url,
+      secret
     });
 
-    const data = await res.json();
-    const ok = res.ok && data.ok !== false;
-
+    const ok = isApiSuccess(res, data);
     renderConfigStatus(
-      ok ? "Webhook configurado correctamente." : "Falló la configuración del webhook.",
+      ok ? "Webhook configurado correctamente." : "Fallo la configuracion del webhook.",
       !ok
     );
-    if (resultEl) resultEl.innerText = JSON.stringify(data, null, 2);
-  } catch (e) {
-    renderConfigStatus(`Error de red: ${e.message}`, true);
+
+    if (dom.webhookResult) {
+      dom.webhookResult.innerText = JSON.stringify(data, null, 2);
+    }
+  } catch (error) {
+    renderConfigStatus(`Error de red: ${error.message}`, true);
   }
 }
 
-/* Consultar Webhook */
 async function checkWebhook() {
-  const channelSelect = document.getElementById("channelSelect");
-  const id_canal = parseInt(channelSelect?.value || document.getElementById("canalId").value);
-  const resultEl = document.getElementById("webhookResult");
+  const idCanal = getSelectedChannelId();
 
-  if (!id_canal) {
-    renderConfigStatus("Debes ingresar un ID de canal válido.", true);
+  if (!idCanal) {
+    renderConfigStatus("Debes ingresar un ID de canal valido.", true);
     return;
   }
 
   try {
-    const res = await fetch("/config/getWebhook", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ id_canal })
-    });
-
-    const data = await res.json();
-    const ok = res.ok && data.ok !== false;
+    const { res, data } = await postJSON("/config/getWebhook", { id_canal: idCanal });
+    const ok = isApiSuccess(res, data);
 
     renderConfigStatus(
-      ok ? "Consulta de webhook completada." : "La consulta de webhook devolvió error.",
+      ok ? "Consulta de webhook completada." : "La consulta de webhook devolvio error.",
       !ok
     );
-    if (resultEl) resultEl.innerText = JSON.stringify(data, null, 2);
-  } catch (e) {
-    renderConfigStatus(`Error de red: ${e.message}`, true);
+
+    if (dom.webhookResult) {
+      dom.webhookResult.innerText = JSON.stringify(data, null, 2);
+    }
+  } catch (error) {
+    renderConfigStatus(`Error de red: ${error.message}`, true);
   }
 }
 
-/* Consultar Balance */
 async function consultBalance() {
-  try {
-    const res = await fetch("/config/balance");
-    const data = await res.json();
-    const balance = getBalanceValue(data);
-    const display = document.getElementById("balanceDisplay");
-    const ok = res.ok && data.ok !== false;
+  if (!dom.balanceDisplay) return;
 
-    if (!display) return;
+  try {
+    const { res, data } = await requestJSON("/config/balance");
+    const balance = getBalanceValue(data);
+    const ok = isApiSuccess(res, data);
 
     if (balance === null) {
-      display.innerText = "No se pudo obtener un valor de saldo válido.";
-      const debug = document.getElementById("webhookResult");
-      if (debug) {
-        debug.innerText = `Respuesta balance:\n${JSON.stringify(data, null, 2)}`;
+      dom.balanceDisplay.innerText = "No se pudo obtener un valor de saldo valido.";
+      if (dom.webhookResult) {
+        dom.webhookResult.innerText = `Respuesta balance:\n${JSON.stringify(data, null, 2)}`;
       }
       renderConfigStatus("No se pudo interpretar el balance de la API. Revisa la respuesta en el panel oscuro.", true);
       return;
     }
 
-    display.innerText = `Saldo actual: $${balance.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    dom.balanceDisplay.innerText = `Saldo actual: $${balance.toLocaleString(APP_CONFIG.currencyLocale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     renderConfigStatus(
       ok ? "Balance consultado correctamente." : "Balance consultado con advertencias.",
       !ok
     );
-  } catch (e) {
-    document.getElementById("balanceDisplay").innerText = "Error de red consultando balance.";
-    renderConfigStatus(`Error de red: ${e.message}`, true);
+  } catch (error) {
+    dom.balanceDisplay.innerText = "Error de red consultando balance.";
+    renderConfigStatus(`Error de red: ${error.message}`, true);
   }
 }
 
-/* =========================
-   INIT
-========================= */
-
-loadConversations();
-setInterval(loadConversations, 5000);
-
-const channelSelect = document.getElementById("channelSelect");
-if (channelSelect) {
-  channelSelect.addEventListener("change", (event) => {
-    const canalInput = document.getElementById("canalId");
-    if (!canalInput) return;
-    canalInput.value = event.target.value || "";
-  });
-}
-
 function openSettings() {
-  document.getElementById("settingsPanel").style.display = "block";
+  if (!dom.settingsPanel) return;
+  dom.settingsPanel.style.display = "block";
   loadChannels();
 }
 
 function closeSettings() {
-  document.getElementById("settingsPanel").style.display = "none";
+  if (!dom.settingsPanel) return;
+  dom.settingsPanel.style.display = "none";
 }
 
-window.onclick = function(event) {
-  const modal = document.getElementById("settingsPanel");
-  if (event.target === modal) {
+const actionHandlers = Object.freeze({
+  openSettings,
+  closeSettings,
+  loadChannels,
+  applyWebhook,
+  checkWebhook,
+  consultBalance,
+  checkBalance,
+  sendQuickAnswer: () => sendQuickAnswer(),
+  transferConversation,
+  sendMessage
+});
+
+function onActionClick(event) {
+  const target = event.target.closest("[data-action]");
+  if (!target) return;
+
+  const action = target.dataset.action;
+  const handler = actionHandlers[action];
+  if (!handler) return;
+
+  event.preventDefault();
+  handler();
+}
+
+function onConversationClick(event) {
+  const item = event.target.closest("[data-conversation-id]");
+  if (!item) return;
+
+  const conversationId = item.dataset.conversationId;
+  if (!conversationId) return;
+
+  selectConversation(conversationId, item);
+}
+
+function onChannelSelectionChange(event) {
+  if (!dom.canalId) return;
+  dom.canalId.value = event.target.value || "";
+}
+
+function onMessageInputKeyDown(event) {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  sendMessage();
+}
+
+function onSettingsBackdropClick(event) {
+  if (event.target === dom.settingsPanel) {
     closeSettings();
   }
 }
+
+function bindEvents() {
+  document.addEventListener("click", onActionClick);
+
+  if (dom.sidebar) {
+    dom.sidebar.addEventListener("click", onConversationClick);
+  }
+
+  if (dom.channelSelect) {
+    dom.channelSelect.addEventListener("change", onChannelSelectionChange);
+  }
+
+  if (dom.messageInput) {
+    dom.messageInput.addEventListener("keydown", onMessageInputKeyDown);
+  }
+
+  if (dom.settingsPanel) {
+    dom.settingsPanel.addEventListener("click", onSettingsBackdropClick);
+  }
+}
+
+function initApp() {
+  bindEvents();
+  loadConversations();
+  setInterval(loadConversations, APP_CONFIG.conversationsPollMs);
+}
+
+initApp();

@@ -3,340 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <title>LiveConnect Inbox</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='main.css') }}">
 
-  <style>
-    :root {
-      --bg-main: #f5f7fb;
-      --bg-card: #ffffff;
-      --bg-chat: #eef2f7;
-      --text-primary: #0f172a;
-      --text-secondary: #475569;
-      --border: #dbe3ef;
-      --brand: #0ea5a4;
-      --brand-dark: #0b7f7f;
-      --accent: #2563eb;
-      --danger: #b91c1c;
-      --shadow-soft: 0 16px 32px rgba(15, 23, 42, 0.12);
-    }
-
-    * { box-sizing: border-box; font-family: "Avenir Next", "Segoe UI", sans-serif; }
-
-    body {
-      margin: 0;
-      height: 100vh;
-      display: flex;
-      background: radial-gradient(circle at top right, #e2f5ff 0%, var(--bg-main) 35%, #f6f9ff 100%);
-      color: var(--text-primary);
-    }
-
-    /* Sidebar */
-    #sidebar {
-      width: 30%;
-      border-right: 1px solid var(--border);
-      background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-      overflow-y: auto;
-      padding-top: 56px;
-    }
-
-    .conversation {
-      padding: 14px 16px;
-      border-bottom: 1px solid #edf2fa;
-      cursor: pointer;
-      color: var(--text-secondary);
-      transition: all 0.2s ease;
-    }
-
-    .conversation:hover {
-      background: #eff6ff;
-      color: var(--text-primary);
-    }
-
-    .conversation.active {
-      background: linear-gradient(90deg, #ccfbf1 0%, #ecfeff 100%);
-      color: #0f766e;
-      border-left: 4px solid var(--brand);
-    }
-
-    /* Chat */
-    #chat {
-      width: 70%;
-      display: flex;
-      flex-direction: column;
-      backdrop-filter: blur(2px);
-    }
-
-    #messages {
-      flex: 1;
-      padding: 20px;
-      overflow-y: auto;
-      background: linear-gradient(180deg, #f8fbff 0%, var(--bg-chat) 100%);
-    }
-
-    .msg {
-      max-width: 70%;
-      padding: 10px 14px;
-      margin-bottom: 10px;
-      border-radius: 14px;
-      clear: both;
-      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
-    }
-
-    .msg.user {
-      background: #ffffff;
-      float: left;
-      border: 1px solid #e5e7eb;
-    }
-
-    .msg.agent {
-      background: linear-gradient(160deg, #d1fae5 0%, #a7f3d0 100%);
-      float: right;
-    }
-
-    /* Input */
-    #input-box {
-      display: flex;
-      padding: 12px;
-      border-top: 1px solid var(--border);
-      background: #ffffff;
-      gap: 8px;
-    }
-
-    #input-box input {
-      flex: 1;
-      padding: 12px;
-      font-size: 15px;
-      border-radius: 12px;
-      border: 1px solid #cbd5e1;
-      outline: none;
-    }
-
-    #input-box input:focus {
-      border-color: #38bdf8;
-      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
-    }
-
-    button {
-      border: 0;
-      border-radius: 10px;
-      padding: 9px 13px;
-      font-weight: 600;
-      letter-spacing: 0.2px;
-      cursor: pointer;
-      transition: all 0.18s ease;
-      background: #e2e8f0;
-      color: #1e293b;
-    }
-
-    button:hover {
-      transform: translateY(-1px);
-      filter: brightness(1.02);
-    }
-
-    #input-box button {
-      min-width: 88px;
-      background: var(--brand);
-      color: #ffffff;
-    }
-
-    #input-box button:hover {
-      background: var(--brand-dark);
-    }
-
-    #top-actions {
-      padding: 10px 12px;
-      border-bottom: 1px solid var(--border);
-      background: #ffffff;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
-    }
-
-    #top-actions button {
-      background: #e0f2fe;
-      color: #075985;
-      border: 1px solid #bae6fd;
-    }
-
-    #top-actions button:nth-child(2) {
-      background: #dcfce7;
-      color: #166534;
-      border-color: #bbf7d0;
-    }
-
-    #top-actions button:nth-child(3) {
-      background: #fee2e2;
-      color: #991b1b;
-      border-color: #fecaca;
-    }
-
-    #configButton button {
-      background: var(--accent);
-      color: #ffffff;
-      box-shadow: 0 10px 20px rgba(37, 99, 235, 0.28);
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
-      font-size: 20px;
-      display: grid;
-      place-items: center;
-    }
-
-    #configStatus {
-      margin-top: 12px;
-      padding: 10px;
-      border-radius: 8px;
-      font-size: 14px;
-      background: #f1f5f9;
-    }
-
-    #configStatus.ok {
-      color: #065f46;
-      background: #d1fae5;
-    }
-
-    #configStatus.error {
-      color: #991b1b;
-      background: #fee2e2;
-    }
-
-    #webhookResult {
-      margin-top: 12px;
-      max-height: 140px;
-      overflow-y: auto;
-      background: #111827;
-      color: #f9fafb;
-      border-radius: 8px;
-      padding: 12px;
-      font-size: 12px;
-      white-space: pre-wrap;
-      word-break: break-word;
-      border: 1px solid #1f2937;
-    }
-
-    #balanceDisplay {
-      margin: 8px 0 12px;
-      padding: 12px;
-      border-radius: 10px;
-      background: #eef2ff;
-      font-weight: 600;
-      color: #312e81;
-      border: 1px solid #c7d2fe;
-    }
-
-    #settingsPanel {
-      display: none;
-      position: fixed;
-      inset: 0;
-      background: rgba(15, 23, 42, 0.52);
-      z-index: 999;
-      padding: 24px;
-    }
-
-    #settingsCard {
-      background: var(--bg-card);
-      width: min(620px, 100%);
-      margin: 40px auto;
-      padding: 26px;
-      border-radius: 16px;
-      box-shadow: var(--shadow-soft);
-      border: 1px solid #dbe3ef;
-    }
-
-    #settingsCard h2 {
-      margin: 0 0 14px;
-      font-size: 34px;
-      letter-spacing: -0.8px;
-    }
-
-    #settingsCard h3 {
-      margin-top: 22px;
-      margin-bottom: 10px;
-      font-size: 24px;
-      letter-spacing: -0.3px;
-    }
-
-    #settingsCard label {
-      display: block;
-      font-weight: 600;
-      color: #334155;
-      margin-bottom: 6px;
-    }
-
-    #settingsCard select,
-    #settingsCard input {
-      width: 100%;
-      margin-bottom: 10px;
-      padding: 10px 11px;
-      border-radius: 10px;
-      border: 1px solid #cbd5e1;
-      font-size: 14px;
-      outline: none;
-    }
-
-    #settingsCard select:focus,
-    #settingsCard input:focus {
-      border-color: #60a5fa;
-      box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.18);
-    }
-
-    #settingsCard .row-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-
-    #settingsCard .row-actions button:first-child {
-      background: var(--brand);
-      color: #fff;
-    }
-
-    #settingsCard .row-actions button:nth-child(2) {
-      background: #e0f2fe;
-      color: #075985;
-      border: 1px solid #bae6fd;
-    }
-
-    #settingsCard .row-actions button:nth-child(3) {
-      background: #e2e8f0;
-      color: #1e293b;
-    }
-
-    #closeSettingsBtn {
-      margin-top: 12px;
-      background: #0f172a;
-      color: #fff;
-    }
-
-    @media (max-width: 980px) {
-      #sidebar { width: 38%; }
-      #chat { width: 62%; }
-    }
-
-    @media (max-width: 760px) {
-      body {
-        flex-direction: column;
-      }
-      #sidebar, #chat {
-        width: 100%;
-      }
-      #sidebar {
-        height: 35vh;
-      }
-      #chat {
-        height: 65vh;
-      }
-      #settingsCard h2 {
-        font-size: 30px;
-      }
-    }
-  </style>
 </head>
 <body>
 
 <!-- Botón Configuración dentro del header -->
-  <div id="configButton" style="position:fixed; top:15px; right:20px; z-index:1000;">
-    <button onclick="openSettings()" title="Configuración">⚙</button>
+  <div id="configButton">
+    <button type="button" data-action="openSettings" title="Configuracion">⚙</button>
   </div>
 
   <!-- Modal Configuración -->
@@ -351,7 +25,7 @@
         <option value="">Sin cargar</option>
       </select>
       <div class="row-actions">
-        <button onclick="loadChannels()">Recargar canales</button>
+        <button type="button" data-action="loadChannels">Recargar canales</button>
       </div>
       <br><br>
       <label for="canalId">ID Canal (manual/respaldo)</label>
@@ -360,22 +34,22 @@
       <input id="secret" placeholder="Secret" />
 
       <div class="row-actions">
-        <button onclick="applyWebhook()">Activar Webhook</button>
-        <button onclick="checkWebhook()">Consultar Webhook</button>
+        <button type="button" data-action="applyWebhook">Activar Webhook</button>
+        <button type="button" data-action="checkWebhook">Consultar Webhook</button>
       </div>
       <div id="webhookResult">Sin resultados aún.</div>
 
-      <hr style="margin:20px 0;">
+      <hr class="section-divider">
 
       <h3>Balance</h3>
       <div id="balanceDisplay">No consultado</div>
       <div class="row-actions">
-        <button onclick="consultBalance()">Consultar Saldo</button>
+        <button type="button" data-action="consultBalance">Consultar Saldo</button>
       </div>
       <div id="configStatus">Esperando acción.</div>
 
       <br><br>
-      <button id="closeSettingsBtn" onclick="closeSettings()">Cerrar</button>
+      <button id="closeSettingsBtn" type="button" data-action="closeSettings">Cerrar</button>
 
     </div>
   </div>
@@ -386,19 +60,19 @@
   <!-- Chat -->
   <div id="chat">
     <div id="top-actions">
-      <button onclick="checkBalance()">Saldo</button>
-      <button onclick="sendQuickAnswer(55050)">QuickAnswer</button>
-      <button onclick="transferConversation()">Transferir</button>
+      <button type="button" data-action="checkBalance">Saldo</button>
+      <button type="button" data-action="sendQuickAnswer">QuickAnswer</button>
+      <button type="button" data-action="transferConversation">Transferir</button>
     </div>
 
     <div id="messages"></div>
 
     <div id="input-box">
       <input id="messageInput" placeholder="Escribe un mensaje..." />
-      <button onclick="sendMessage()">Enviar</button>
+      <button type="button" data-action="sendMessage">Enviar</button>
     </div>
   </div>
 
-<script src="/static/main.js"></script>
+<script src="{{ url_for('static', filename='main.js') }}"></script>
 </body>
 </html>

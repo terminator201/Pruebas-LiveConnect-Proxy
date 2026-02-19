@@ -66,7 +66,9 @@ def api_get_messages(conversation_id):
 
 @app.route("/webhook/liveconnect", methods=["POST"])
 def webhook():
-    return jsonify(procesar_webhook(request.json)), 200
+    result = procesar_webhook(request.get_json(silent=True))
+    status_code = 200 if result.get("ok", result.get("status") == "ok") else 400
+    return jsonify(result), status_code
 
 @app.route("/setWebhook", methods=["POST"])
 def api_set_webhook():
