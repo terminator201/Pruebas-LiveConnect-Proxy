@@ -31,13 +31,49 @@
       <label for="canalId">ID Canal (manual/respaldo)</label>
       <input id="canalId" placeholder="ID Canal" />
       <input id="webhookUrl" placeholder="URL Webhook" />
-      <input id="secret" placeholder="Secret" />
+      <input id="secret" placeholder="Secret (opcional)" />
 
       <div class="row-actions">
-        <button type="button" data-action="applyWebhook">Activar Webhook</button>
-        <button type="button" data-action="checkWebhook">Consultar Webhook</button>
+        <button type="button" data-action="activateWebhook">Activar Proxy</button>
+        <button type="button" data-action="deactivateWebhook">Desactivar Proxy</button>
       </div>
       <div id="webhookResult">Sin resultados aún.</div>
+
+      <hr class="section-divider">
+
+      <h3>QuickAnswer</h3>
+      <label for="quickAnswerId">ID Respuesta</label>
+      <input id="quickAnswerId" placeholder="ID Respuesta" />
+      <label for="quickAnswerVariables">Variables (JSON)</label>
+      <textarea id="quickAnswerVariables" rows="4" placeholder='{"visitante.nombre":"Juan","pedido.numero":"1234"}'>{}</textarea>
+      <div class="row-actions">
+        <button type="button" data-action="sendQuickAnswer">Enviar QuickAnswer</button>
+      </div>
+
+      <hr class="section-divider">
+
+      <h3>Enviar Archivo</h3>
+      <label for="fileUrl">URL Archivo</label>
+      <input id="fileUrl" placeholder="https://..." />
+      <label for="fileName">Nombre Archivo</label>
+      <input id="fileName" placeholder="documento" />
+      <label for="fileExtension">Extension</label>
+      <select id="fileExtension">
+        <option value="">Selecciona extension</option>
+        <option value="pdf">pdf</option>
+        <option value="jpg">jpg</option>
+        <option value="jpeg">jpeg</option>
+        <option value="png">png</option>
+        <option value="doc">doc</option>
+        <option value="docx">docx</option>
+        <option value="xls">xls</option>
+        <option value="xlsx">xlsx</option>
+        <option value="csv">csv</option>
+        <option value="txt">txt</option>
+      </select>
+      <div class="row-actions">
+        <button type="button" data-action="sendFile">Enviar Archivo</button>
+      </div>
 
       <hr class="section-divider">
 

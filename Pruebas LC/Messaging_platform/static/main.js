@@ -1,6 +1,6 @@
 const APP_CONFIG = Object.freeze({
   conversationsPollMs: 5000,
-  defaultQuickAnswerId: 55050,
+  messagesPollMs: 2000,
   defaultTransferChannelId: 3918,
   currencyLocale: "es-CO"
 });
@@ -16,6 +16,19 @@ const CHANNEL_TYPES = Object.freeze({
   8: "LinkedIn",
   9: "Google My Business"
 });
+
+const ALLOWED_FILE_EXTENSIONS = Object.freeze([
+  "pdf",
+  "jpg",
+  "jpeg",
+  "png",
+  "doc",
+  "docx",
+  "xls",
+  "xlsx",
+  "csv",
+  "txt"
+]);
 
 const UI_TEXT = Object.freeze({
   invalidConversation: "Selecciona una conversacion primero.",
@@ -39,13 +52,23 @@ const dom = {
   secret: document.getElementById("secret"),
   webhookResult: document.getElementById("webhookResult"),
   configStatus: document.getElementById("configStatus"),
-  balanceDisplay: document.getElementById("balanceDisplay")
+  balanceDisplay: document.getElementById("balanceDisplay"),
+  fileUrl: document.getElementById("fileUrl"),
+  fileName: document.getElementById("fileName"),
+  fileExtension: document.getElementById("fileExtension"),
+  quickAnswerId: document.getElementById("quickAnswerId"),
+  quickAnswerVariables: document.getElementById("quickAnswerVariables")
 };
 
 function renderConfigStatus(text, isError = false) {
   if (!dom.configStatus) return;
   dom.configStatus.innerText = text;
   dom.configStatus.className = isError ? "error" : "ok";
+}
+
+function writeWebhookResult(data) {
+  if (!dom.webhookResult) return;
+  dom.webhookResult.innerText = JSON.stringify(data, null, 2);
 }
 
 function isApiSuccess(res, data) {
@@ -181,6 +204,28 @@ function renderMessageList(messages) {
   dom.messages.scrollTop = dom.messages.scrollHeight;
 }
 
+function parseVariablesJSON(rawValue) {
+  const trimmed = String(rawValue || "").trim();
+  if (!trimmed) return {};
+
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (_error) {
+    throw new Error("El JSON de variables no es valido.");
+  }
+
+  if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+    throw new Error("Las variables deben ser un objeto JSON.");
+  }
+
+  return parsed;
+}
+
+function normalizeFileExtension(value) {
+  return String(value || "").trim().toLowerCase().replace(/^\./, "");
+}
+
 async function loadChannels() {
   if (!dom.channelSelect || !dom.canalId) return;
 
@@ -247,7 +292,13 @@ async function loadMessages(conversationId) {
     const encodedId = encodeURIComponent(conversationId);
     const { data } = await requestJSON(`/messages/${encodedId}`);
     const messages = Array.isArray(data) ? data : [];
-    renderMessageList(messages);
+
+    const normalizedMessages = messages.map((messageItem) => ({
+      sender: messageItem?.sender === "usuario" ? "usuario" : "agent",
+      message: String(messageItem?.message || "")
+    }));
+
+    renderMessageList(normalizedMessages);
   } catch (_error) {
     dom.messages.innerHTML = "";
   }
@@ -260,27 +311,103 @@ async function sendMessage() {
   const message = dom.messageInput.value.trim();
   if (!message) return;
 
-  await postJSON("/sendMessage", {
+  const payload = {
     id_conversacion: conversationId,
     mensaje: message
-  });
+  };
+
+  const { res, data } = await postJSON("/sendMessage", payload);
+  if (!isApiSuccess(res, data)) {
+    renderConfigStatus("No se pudo enviar el mensaje.", true);
+    writeWebhookResult(data);
+    return;
+  }
 
   dom.messageInput.value = "";
+  renderConfigStatus("Mensaje enviado correctamente.");
+  writeWebhookResult(data);
   await loadMessages(conversationId);
 }
 
-async function sendQuickAnswer(answerId = APP_CONFIG.defaultQuickAnswerId) {
+async function sendQuickAnswer() {
   const conversationId = ensureCurrentConversation();
   if (!conversationId) return;
 
-  await postJSON("/sendQuickAnswer", {
-    id_conversacion: conversationId,
-    id_respuesta: answerId,
-    variables: {
-      "visitante.nombre": "Carolina"
-    }
-  });
+  const rawQuickAnswerId = dom.quickAnswerId?.value?.trim();
+  if (!rawQuickAnswerId) {
+    renderConfigStatus("Debes ingresar el ID de respuesta para QuickAnswer.", true);
+    return;
+  }
 
+  const idRespuesta = Number.parseInt(rawQuickAnswerId, 10);
+  if (!Number.isFinite(idRespuesta)) {
+    renderConfigStatus("El ID de respuesta debe ser numerico.", true);
+    return;
+  }
+
+  let variables;
+  try {
+    variables = parseVariablesJSON(dom.quickAnswerVariables?.value || "{}");
+  } catch (error) {
+    renderConfigStatus(error.message, true);
+    return;
+  }
+
+  const payload = {
+    id_conversacion: conversationId,
+    id_respuesta: idRespuesta,
+    variables
+  };
+
+  const { res, data } = await postJSON("/sendQuickAnswer", payload);
+  if (!isApiSuccess(res, data)) {
+    renderConfigStatus("No se pudo enviar el QuickAnswer.", true);
+    writeWebhookResult(data);
+    return;
+  }
+
+  renderConfigStatus("QuickAnswer enviado correctamente.");
+  writeWebhookResult(data);
+  await loadMessages(conversationId);
+}
+
+async function sendFile() {
+  const conversationId = ensureCurrentConversation();
+  if (!conversationId) return;
+
+  const url = dom.fileUrl?.value?.trim() || "";
+  const nombre = dom.fileName?.value?.trim() || "";
+  const extension = normalizeFileExtension(dom.fileExtension?.value || "");
+
+  if (!url) {
+    renderConfigStatus("Debes ingresar la URL del archivo.", true);
+    return;
+  }
+  if (!nombre) {
+    renderConfigStatus("Debes ingresar el nombre del archivo.", true);
+    return;
+  }
+  if (!ALLOWED_FILE_EXTENSIONS.includes(extension)) {
+    renderConfigStatus("Debes seleccionar una extension valida.", true);
+    return;
+  }
+
+  const payload = {
+    id_conversacion: conversationId,
+    url,
+    nombre,
+    extension
+  };
+
+  const { res, data } = await postJSON("/sendFile", payload);
+  if (!isApiSuccess(res, data)) {
+    renderConfigStatus("No se pudo enviar el archivo.", true);
+    writeWebhookResult(data);
+    return;
+  }
+
+  renderConfigStatus("Archivo enviado correctamente.");
+  writeWebhookResult(data);
   await loadMessages(conversationId);
 }
 
@@ -315,36 +442,60 @@ async function checkBalance() {
   alert(`Saldo disponible: $${balance}`);
 }
 
-async function applyWebhook() {
+function getWebhookFormValues() {
   const idCanal = getSelectedChannelId();
-  const url = dom.webhookUrl?.value?.trim();
-  const secret = dom.secret?.value?.trim();
+  const url = dom.webhookUrl?.value?.trim() || "";
+  const secret = dom.secret?.value?.trim() || "";
+  return { idCanal, url, secret };
+}
 
-  if (!idCanal || !url || !secret) {
-    renderConfigStatus("Debes completar ID canal, URL y secret.", true);
+function buildWebhookPayload({ idCanal, estado, url, secret }) {
+  return {
+    id_canal: Number.parseInt(String(idCanal), 10),
+    estado: Boolean(estado),
+    url,
+    secret
+  };
+}
+
+async function submitWebhookState(estado) {
+  const { idCanal, url, secret } = getWebhookFormValues();
+
+  if (!idCanal) {
+    renderConfigStatus("Debes ingresar un ID de canal valido.", true);
     return;
   }
 
-  try {
-    const { res, data } = await postJSON("/config/setWebhook", {
-      id_canal: idCanal,
-      estado: true,
-      url,
-      secret
-    });
+  if (estado === true && !url) {
+    renderConfigStatus("Debes ingresar la URL del webhook para activar el proxy.", true);
+    return;
+  }
 
+  const payload = buildWebhookPayload({ idCanal, estado, url, secret });
+
+  try {
+    const { res, data } = await postJSON("/config/setWebhook", payload);
     const ok = isApiSuccess(res, data);
+
     renderConfigStatus(
-      ok ? "Webhook configurado correctamente." : "Fallo la configuracion del webhook.",
+      ok
+        ? (estado ? "Proxy activado correctamente." : "Proxy desactivado correctamente.")
+        : (estado ? "No se pudo activar el proxy." : "No se pudo desactivar el proxy."),
       !ok
     );
 
-    if (dom.webhookResult) {
-      dom.webhookResult.innerText = JSON.stringify(data, null, 2);
-    }
+    writeWebhookResult(data);
   } catch (error) {
     renderConfigStatus(`Error de red: ${error.message}`, true);
   }
+}
+
+async function activateWebhook() {
+  await submitWebhookState(true);
+}
+
+async function deactivateWebhook() {
+  await submitWebhookState(false);
 }
 
 async function checkWebhook() {
@@ -364,9 +515,7 @@ async function checkWebhook() {
       !ok
     );
 
-    if (dom.webhookResult) {
-      dom.webhookResult.innerText = JSON.stringify(data, null, 2);
-    }
+    writeWebhookResult(data);
   } catch (error) {
     renderConfigStatus(`Error de red: ${error.message}`, true);
   }
@@ -382,9 +531,7 @@ async function consultBalance() {
 
     if (balance === null) {
       dom.balanceDisplay.innerText = "No se pudo obtener un valor de saldo valido.";
-      if (dom.webhookResult) {
-        dom.webhookResult.innerText = `Respuesta balance:\n${JSON.stringify(data, null, 2)}`;
-      }
+      writeWebhookResult({ balance_response: data });
       renderConfigStatus("No se pudo interpretar el balance de la API. Revisa la respuesta en el panel oscuro.", true);
       return;
     }
@@ -415,11 +562,13 @@ const actionHandlers = Object.freeze({
   openSettings,
   closeSettings,
   loadChannels,
-  applyWebhook,
+  activateWebhook,
+  deactivateWebhook,
   checkWebhook,
   consultBalance,
   checkBalance,
-  sendQuickAnswer: () => sendQuickAnswer(),
+  sendQuickAnswer,
+  sendFile,
   transferConversation,
   sendMessage
 });
@@ -487,6 +636,11 @@ function initApp() {
   bindEvents();
   loadConversations();
   setInterval(loadConversations, APP_CONFIG.conversationsPollMs);
+  setInterval(() => {
+    if (state.currentConversation) {
+      loadMessages(state.currentConversation);
+    }
+  }, APP_CONFIG.messagesPollMs);
 }
 
 initApp();
