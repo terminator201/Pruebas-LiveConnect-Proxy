@@ -2,7 +2,7 @@ import requests
 from metodos.Token import obtener_token
 from DB.database import save_balance
 
-def get_balance():
+def get_balance(expected_idc=None):
     token = obtener_token()
     headers = {"PageGearToken": token}
 
@@ -18,15 +18,42 @@ def get_balance():
     try:
         payload = res.json()
     except ValueError:
-        payload = {"raw_response": res.text}
+        return {
+            "ok": False,
+            "error": "Respuesta inválida del servidor",
+            "raw_response": res.text
+        }
 
-    if isinstance(payload, dict):
-        payload.setdefault("ok", res.ok)
-        payload["status_code"] = res.status_code
-    else:
-        payload = {"ok": res.ok, "status_code": res.status_code, "data": payload}
+    if not res.ok:
+        return {
+            "ok": False,
+            "status_code": res.status_code,
+            "error": payload
+        }
 
-    if res.ok:
-        save_balance(payload)
+    # 🔹 Validación de estructura
+    data = payload.get("data")
+    if not data:
+        return {"ok": False, "error": "No se encontró data en la respuesta"}
 
-    return payload
+    idc = data.get("idc")
+    balance = data.get("balance")
+
+    # 🔹 Validación por número de cuenta
+    if expected_idc is not None:
+        if str(idc) != str(expected_idc):
+            return {
+                "ok": False,
+                "error": f"El balance recibido pertenece al idc {idc}, no a {expected_idc}"
+            }
+
+    result = {
+        "ok": True,
+        "idc": idc,
+        "balance": balance,
+        "detail": data
+    }
+
+    save_balance(result)
+
+    return result
