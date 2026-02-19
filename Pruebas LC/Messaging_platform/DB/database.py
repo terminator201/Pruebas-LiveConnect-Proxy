@@ -12,6 +12,25 @@ class SQLiteRepository:
     def _connect(self):
         return sqlite3.connect(self.db_name)
 
+    @staticmethod
+    def _normalize_message_text(message):
+        if isinstance(message, str):
+            normalized = message.strip()
+            return normalized
+
+        if isinstance(message, (int, float, bool)):
+            normalized = str(message).strip()
+            return normalized
+
+        return ""
+
+    @staticmethod
+    def _normalize_contact_name(contact_name):
+        if not isinstance(contact_name, str):
+            return None
+        normalized = contact_name.strip()
+        return normalized if normalized else None
+
     def init_schema(self):
         with self._connect() as conn:
             cursor = conn.cursor()
@@ -21,6 +40,7 @@ class SQLiteRepository:
                 CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY,
                     canal TEXT,
+                    contact_name TEXT,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
                 """
@@ -47,40 +67,63 @@ class SQLiteRepository:
                 """
             )
 
-    def save_message(self, conversation_id, canal, sender, message):
+            cursor.execute("PRAGMA table_info(conversations)")
+            conversation_columns = {row[1] for row in cursor.fetchall()}
+            if "contact_name" not in conversation_columns:
+                cursor.execute("ALTER TABLE conversations ADD COLUMN contact_name TEXT")
+
+    def save_message(self, conversation_id, canal, sender, message, contact_name=None):
+        normalized_conversation_id = str(conversation_id or "").strip()
+        normalized_canal = str(canal or "").strip() or "unknown"
+        normalized_sender = str(sender or "").strip() or "usuario"
+        normalized_message = self._normalize_message_text(message)
+        normalized_contact_name = self._normalize_contact_name(contact_name)
+
+        if not normalized_conversation_id:
+            raise ValueError("conversation_id es requerido")
+
+        if not normalized_message:
+            return False
+
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                INSERT INTO conversations (id, canal, updated_at)
-                VALUES (?, ?, CURRENT_TIMESTAMP)
+                INSERT INTO conversations (id, canal, contact_name, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     canal = excluded.canal,
+                    contact_name = CASE
+                        WHEN excluded.contact_name IS NULL OR excluded.contact_name = ''
+                        THEN conversations.contact_name
+                        ELSE excluded.contact_name
+                    END,
                     updated_at = CURRENT_TIMESTAMP
                 """,
-                (conversation_id, canal),
+                (normalized_conversation_id, normalized_canal, normalized_contact_name),
             )
             cursor.execute(
                 """
                 INSERT INTO messages (conversation_id, sender, message)
                 VALUES (?, ?, ?)
                 """,
-                (conversation_id, sender, message),
+                (normalized_conversation_id, normalized_sender, normalized_message),
             )
+        return True
 
     def list_conversations(self):
         with self._connect() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT id, canal, updated_at
+                SELECT id, canal, contact_name, updated_at
                 FROM conversations
                 ORDER BY updated_at DESC
                 """
             )
             rows = cursor.fetchall()
         return [
-            {"id": row[0], "canal": row[1], "updated_at": row[2]}
+            {"id": row[0], "canal": row[1], "contact_name": row[2], "updated_at": row[3]}
             for row in rows
         ]
 
@@ -92,6 +135,7 @@ class SQLiteRepository:
                 SELECT sender, message, created_at
                 FROM messages
                 WHERE conversation_id = ?
+                AND TRIM(COALESCE(message, '')) <> ''
                 ORDER BY created_at ASC, id ASC
                 """,
                 (conversation_id,),
@@ -141,8 +185,14 @@ def init_db():
     default_repository.init_schema()
 
 
-def save_message(conversation_id, canal, sender, message):
-    default_repository.save_message(conversation_id, canal, sender, message)
+def save_message(conversation_id, canal, sender, message, contact_name=None):
+    return default_repository.save_message(
+        conversation_id=conversation_id,
+        canal=canal,
+        sender=sender,
+        message=message,
+        contact_name=contact_name,
+    )
 
 
 def get_conversations():

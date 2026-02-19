@@ -3,6 +3,14 @@ from metodos.Token import obtener_token
 from DB.database import save_message
 
 
+def _normalize_text(value):
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float, bool)):
+        return str(value).strip()
+    return ""
+
+
 def _normalize_response(response):
     try:
         payload = response.json()
@@ -21,7 +29,7 @@ def send_message(data):
         return {"ok": False, "status_code": 400, "error": "Payload JSON invalido"}
 
     conversation_id = str(data.get("id_conversacion", "")).strip()
-    message_text = str(data.get("mensaje", "")).strip()
+    message_text = _normalize_text(data.get("mensaje"))
     if not conversation_id:
         return {"ok": False, "status_code": 400, "error": "id_conversacion es requerido"}
     if not message_text:
@@ -55,7 +63,7 @@ def send_message(data):
     response_payload = _normalize_response(res)
 
     if res.ok:
-        canal = str(data.get("canal", "proxy"))
+        canal = str(data.get("canal") or data.get("id_canal") or "proxy").strip()
         try:
             save_message(conversation_id, canal, "agent", message_text)
         except Exception as error:
